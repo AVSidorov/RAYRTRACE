@@ -10,7 +10,7 @@ class Nfield:
         # TODO: error checking
         if isinstance(den, dict):
             if 'n' in den.keys():
-                self.n = np.array(den['n'])
+                self.n = np.array(den['n'], np.float64)
             else:
                 pass
             if 'x' in den.keys():

@@ -3,12 +3,16 @@ from scipy import constants as const
 from sidtrace import trace
 
 
+# from sidtrace import check
+
 class Ray:
+    MaxStep = 100000  # Settings variable for arrays preallocating
+
     def __init__(self, x0=0, y0=0, kx0=0, ky0=1, freq=135e9, n_field=None):
-        self.x = np.zeros(100000)
-        self.y = np.zeros(100000)
-        self.kx = np.zeros(100000)
-        self.ky = np.zeros(100000)
+        self.x = np.zeros(Ray.MaxStep)
+        self.y = np.zeros(Ray.MaxStep)
+        self.kx = np.zeros(Ray.MaxStep)
+        self.ky = np.zeros(Ray.MaxStep)
 
         self.x[0] = x0
         self.y[0] = y0
@@ -40,15 +44,18 @@ class Ray:
             self.x[0] = n_field.x_interpolant(self.x[0])
             self.y[0] = n_field.y_interpolant(self.y[0])
 
+            # trace with precompiled code
             i = trace(self.x, self.y, self.kx, self.ky,
                       n_field.st, n_field.dx[0], n_field.dy[0],
                       n_field.nx, n_field.ny,
                       n_field.ax, n_field.ay)
 
+            # reduce length of arrays
             self.x = self.x[:i]
             self.y = self.y[:i]
             self.kx = self.kx[:i]
             self.ky = self.ky[:i]
+
             # convert to physical values
             self.x = x0 + (self.x - self.x[0]) * n_field.dx[0]
             self.y = y0 + (self.y - self.y[0]) * n_field.dy[0]

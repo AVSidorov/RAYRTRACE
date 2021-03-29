@@ -5,7 +5,6 @@
 #include "arrayobject.h"
 
 #include "math.h"
-#define SIZE 20000
 
 static PyObject *
 sidtrace_trace(PyObject *self, PyObject *args)
@@ -18,96 +17,60 @@ sidtrace_trace(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "OOOOdddiiOO", &x,&y,&kx,&ky,&st,&dx,&dy,&nx,&ny,&ax,&ay))
         return NULL;
 
-	//TRACE
+    //represent as dynamic linear arrays
+    double *xx, *yy ,*kxx, *kyy, *Mx,*My;
 
-	// iternal and service vars
-	int i = 0;
-	int x_i,y_i;
-    double xx, yy ,kxx,kyy, Mx,My;
-    void *data;
-	PyObject *item;
+    kxx = (double*)PyArray_DATA(kx);
+    kyy = (double*)PyArray_DATA(ky);
 
-    data = PyArray_GETPTR1(kx,0);
-    item = PyArray_GETITEM(kx,data);
-    kxx = PyFloat_AsDouble(item);
+    xx = (double*)PyArray_DATA(x);
+    yy = (double*)PyArray_DATA(y);
 
-    data = PyArray_GETPTR1(ky,0);
-    item = PyArray_GETITEM(ky,data);
-    kyy = PyFloat_AsDouble(item);
+    Mx = (double*)PyArray_DATA(ax);
+    My = (double*)PyArray_DATA(ay);
 
-    data = PyArray_GETPTR1(x,0);
-    item = PyArray_GETITEM(x,data);
-    xx = PyFloat_AsDouble(item);
+    // internal pointers and service vars
+    int i = 0, ind,MaxI;
+    MaxI= *PyArray_DIMS(x);
 
-    data = PyArray_GETPTR1(y,0);
-    item = PyArray_GETITEM(y,data);
-    yy = PyFloat_AsDouble(item);
+    //TRACE
+    while (i<MaxI-1 && xx[i] >= 0 && xx[i] < nx-1 && yy[i] >= 0 && yy[i]< ny-1)
+    {
+	    ind = (int)floor(yy[i])*(nx-1)+(int)floor(xx[i]);
 
+        xx[i+1] = xx[i] + (st * st * Mx[ind] / 2 + kxx[i] * st ) / dx;
+        yy[i+1] = yy[i] + (st * st * My[ind] / 2 + kyy[i] * st ) / dy;
 
-   while (i<SIZE-1 && xx >= 0 && xx < nx-1 && yy >= 0 && yy< ny-1) 
-   	{
-	x_i = (int)floor(xx);
-	y_i = (int)floor(yy);
+        kxx[i+1] = kxx[i] + st * Mx[ind];
+        kyy[i+1] = kyy[i] + st * My[ind];
 
-        data = PyArray_GETPTR2(ax,y_i,x_i);
-        item = PyArray_GETITEM(ax,data);
-        Mx = PyFloat_AsDouble(item);
-
-        data = PyArray_GETPTR2(ay,y_i,x_i);
-        item = PyArray_GETITEM(ay,data);
-        My = PyFloat_AsDouble(item);
-
-        xx = xx + (st * st * Mx / 2 + kxx * st ) / dx;
-        yy = yy + (st * st * My / 2 + kyy * st ) / dy;
-
-        kxx = kxx + st * Mx;
-        kyy = kyy + st * My;
-
-
-        // store in Py vars
         i++;
-        data = PyArray_GETPTR1(kx,i);
-        PyArray_SETITEM(kx,data,PyFloat_FromDouble(kxx));
-
-        data = PyArray_GETPTR1(ky,i);
-        PyArray_SETITEM(ky,data,PyFloat_FromDouble(kyy));
-
-        data = PyArray_GETPTR1(x,i);
-        PyArray_SETITEM(x,data,PyFloat_FromDouble(xx));
-
-        data = PyArray_GETPTR1(y,i);
-        PyArray_SETITEM(y,data,PyFloat_FromDouble(yy));
-	}
+    }
 
     return Py_BuildValue("i",i);
 }
+
 static PyObject *
 sidtrace_check(PyObject *self, PyObject *args)
 {
-    // INPUT
-    PyObject *alpha;
-    int i,j;
-    double k;
+    int nx,ny,i,j;
+    PyObject  *ax;
 
-    if (!PyArg_ParseTuple(args, "Oiid", &alpha,&i,&j,&k))
-      return NULL;
+    if (!PyArg_ParseTuple(args, "iiiiO",&nx,&ny,&i,&j,&ax))
+        return NULL;
 
-    //Extract values
+    //represent as dynamic linear arrays
+    double *a;
+    a = (double*)PyArray_DATA(ax);
 
-    void *data;
-    PyObject *item;
-    double A;
+	int ind = i*nx+j;
 
-    data = PyArray_GETPTR2(alpha,i,j);
-    item = PyArray_GETITEM(alpha,data);
-    A = k * PyFloat_AsDouble(item);
-    PyArray_SETITEM(alpha,data,PyFloat_FromDouble(A));
-
-    return Py_BuildValue("iid",i,j,k);
+    return PyFloat_FromDouble(a[ind]);
 }
+
 static PyMethodDef SidtraceMethods[] = {
     {"trace",  sidtrace_trace, METH_VARARGS, "Trace the ray"},
-    {"check",  sidtrace_check, METH_VARARGS, "check reading"},
+    {"check",  sidtrace_check, METH_VARARGS, "Check array access"},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
