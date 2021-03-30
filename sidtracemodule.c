@@ -36,7 +36,8 @@ sidtrace_trace(PyObject *self, PyObject *args)
     //TRACE
     while (i<MaxI-1 && xx[i] >= 0 && xx[i] < nx-1 && yy[i] >= 0 && yy[i]< ny-1)
     {
-	    ind = (int)floor(yy[i])*(nx-1)+(int)floor(xx[i]);
+	    ind = (int)trunc(yy[i])*(nx-1)+(int)trunc(xx[i]);
+	    // TODO check only cast without floor/truncate
 
         xx[i+1] = xx[i] + (st * st * Mx[ind] / 2 + kxx[i] * st ) / dx;
         yy[i+1] = yy[i] + (st * st * My[ind] / 2 + kyy[i] * st ) / dy;
