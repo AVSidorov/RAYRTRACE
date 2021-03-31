@@ -2,8 +2,20 @@ import numpy as np
 from scipy import constants as const
 from scipy.interpolate import interp1d, interp2d
 
+from beam import Beam
+
+
+class Beams(list):
+    def __init__(self, n_field=None):
+        self.n_field = n_field
+        super().__init__()
+
+    def append(self, *args, **kwargs) -> None:
+        super().append(Beam(*args, **kwargs, n_field=self.n_field))
+
 
 class Nfield:
+
     def __init__(self, den, *, nx=100, ny=100, x=[], y=[],
                  len_unit='cm', den_unit='cm^-3'):
         # TODO: add support of rxyten like density input
@@ -44,6 +56,8 @@ class Nfield:
 
         self.min_dxy = min(self.dx.min(), self.dy.min())
         self.prep_raytrace()
+        self.beamsTX = Beams(self)
+        self.beamsRX = Beams()
 
     def prep_raytrace(self, freq=135e9):
 
