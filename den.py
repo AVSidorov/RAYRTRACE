@@ -43,6 +43,7 @@ class Nfield:
         self.n_interpolant = interp2d(self.x, self.y, self.n, kind='cubic')
 
         self.min_dxy = min(self.dx.min(), self.dy.min())
+        self.prep_raytrace()
 
     def prep_raytrace(self, freq=135e9):
 
