@@ -5,10 +5,11 @@ from sidtrace import trace
 
 # from sidtrace import check
 
+
 class Ray:
     MaxStep = 100000  # Settings variable for arrays preallocating
 
-    def __init__(self, x0=0, y0=0, kx0=0, ky0=1, freq=135e9, n_field=None):
+    def __init__(self, x0=0, y0=0, kx0=0, ky0=1, freq=135e9, amp=1, n_field=None):
         self.x = np.zeros(Ray.MaxStep)
         self.y = np.zeros(Ray.MaxStep)
         self.kx = np.zeros(Ray.MaxStep)
@@ -20,11 +21,21 @@ class Ray:
         self.freq = freq
         c = const.speed_of_light * 100
         w = 2 * np.pi * freq
-        # if freq is not set try to get frequency from wave number
-        if np.sqrt(kx0 ** 2 + ky0 ** 2) == 1:
-            # assume that only initial direction of ray is given
+
+        if np.sqrt(kx0 ** 2 + ky0 ** 2) <= 2 or self.freq != 135e9:
+            # only initial direction of ray is given
+            # or freq is fixed
+
+            # normalize wave vector
+            k = np.linalg.norm((kx0, ky0))
+            kx0 = kx0 / k
+            ky0 = ky0 / k
+
+            # make vacuum value
             kx0 = kx0 * w / c
             ky0 = ky0 * w / c
+
+        # if freq is not set try to get frequency from wave number
         elif self.freq == 135e9:
             # if default value of frequency is used
             w = np.sqrt(kx0 ** 2 + ky0 ** 2) * c
@@ -32,6 +43,8 @@ class Ray:
 
         self.kx[0] = kx0
         self.ky[0] = ky0
+
+        self.amp = amp
 
         # launch ray if density is given
         if not (n_field is None):
