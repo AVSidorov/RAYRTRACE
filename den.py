@@ -16,8 +16,12 @@ class Beams(list):
 
 class Nfield:
 
-    def __init__(self, den, *, nx=100, ny=100, x=[], y=[],
+    def __init__(self, den, *, nx=100, ny=100, x=None, y=None,
                  len_unit='cm', den_unit='cm^-3'):
+
+        self.len_unit = len_unit
+        self.den_unit = den_unit
+
         # TODO: add support of rxyten like density input
         # TODO: error checking
         if isinstance(den, dict):
@@ -77,18 +81,3 @@ class Nfield:
         a_max = max(np.max(abs(self.ax)), np.max(abs(self.ay)))
         b_max = w / c
         self.st = min((-b_max + np.sqrt(b_max ** 2 + 4 * a_max * self.min_dxy)) / 2 / a_max, self.min_dxy * c / w)
-
-    def plot(self, plt_type='contour'):
-
-        xx, yy = np.meshgrid(self.x, self.y)
-
-        import matplotlib.pyplot as plt
-        import matplotlib.cm as cm
-
-        fig, ax = plt.subplots()
-
-        if plt_type == 'contour':
-            ax.contourf(xx, yy, self.n, 33, cmap=cm.jet)
-            ax.set_aspect(1)
-        elif plt_type == 'surf':
-            ax.plot_surface(xx, yy, self.n, cmap=cm.jet, linewidth=0)
