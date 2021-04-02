@@ -88,7 +88,7 @@ class Nfield:
         fig, ax = plt.subplots()
 
         if plt_type == 'contour':
-            ax.contourf(xx, yy, self.n, 33, cmap=cm.coolwarm)
+            ax.contourf(xx, yy, self.n, 33, cmap=cm.jet)
             ax.set_aspect(1)
         elif plt_type == 'surf':
-            ax.plot_surface(xx, yy, self.n, cmap=cm.coolwarm, linewidth=0)
+            ax.plot_surface(xx, yy, self.n, cmap=cm.jet, linewidth=0)

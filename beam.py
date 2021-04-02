@@ -3,7 +3,7 @@ from scipy import constants as const
 from scipy.interpolate import interp1d
 from skimage import measure
 
-from cray import Ray
+from ray import Ray
 
 
 class Beam:
