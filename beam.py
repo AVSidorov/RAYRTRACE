@@ -8,9 +8,9 @@ from ray import Ray
 
 class Beam:
     _nfront = 1000  # settings for wavefront finder
-    _nray = 100
-    _dist = 0.02
-    _ampbnd = 0.001
+    _nray = 100  # default number of rays
+    _dist = 0.02  # default distance from focus for ray starts
+    _ampbnd = 0.001  # default setting for width of rays start area determination
 
     def __init__(self, x0=0, y0=0, kx0=0, ky0=1,
                  freq=136.268e9, waist=0.0035, focus=0.01,
@@ -207,6 +207,7 @@ class Beam:
         wave_front = self._wavefront(dist, ampbnd)
         return self.beam2lab(wave_front.x, wave_front.y)
 
+    # rays generator
     def rays(self, rnum=100, dist=0.02, ampbnd=0.001, n_field=None):
 
         # constants and parameters
@@ -281,3 +282,52 @@ class Beam:
                 self._rays = np.append(self._rays, Ray(x0, y0, kx0, ky0, self.freq, amp0, n_field=n_field))
 
         return x, y, kx, ky, amps, phase, dist
+
+    # 1D field obtained from rays
+    def field_r(self, y, axis='y'):
+
+        # TODO parsing for x,y
+
+        amp0 = np.ndarray((0,))
+        ph = np.ndarray((0,))
+        pnt = np.ndarray((0,), dtype=int)
+        dist0 = np.ndarray((0,))
+        dist1 = np.ndarray((0,))
+        xout = np.ndarray((0,))
+
+        for rm, rl, rr in zip(self._rays, np.roll(self._rays, 1), np.roll(self._rays, -1)):
+
+            amp0 = np.append(amp0, rm.amp)
+
+            dist0 = np.append(dist0, np.sqrt((rm.x[0] - rl.x[0]) ** 2 + (rm.y[0] - rl.y[0]) ** 2))
+            dist0 = np.append(dist0, np.sqrt((rm.x[0] - rr.x[0]) ** 2 + (rm.y[0] - rr.y[0]) ** 2))
+
+            ind = rm.addpoint(y, axis=axis)
+            if len(ind) > 1:
+                return None
+
+            pnt = np.append(pnt, ind)
+            ph = np.append(ph, rm.ph[ind])
+            xout = np.append(xout, rm.x[ind])
+
+            xx = np.ndarray((0,))
+            yy = np.ndarray((0,))
+            for r in (rl, rr):
+                ph2x = interp1d(r.ph, r.x, fill_value='extrapolate')
+                ph2y = interp1d(r.ph, r.y, fill_value="extrapolate")
+                xx = np.append(xx, ph2x(rm.ph[ind]))
+                yy = np.append(yy, ph2y(rm.ph[ind]))
+
+            dist1 = np.append(dist1, np.sqrt((xx - rm.x[ind]) ** 2 + (yy - rm.y[ind]) ** 2))
+
+        dist0[0] = dist0[1]
+        dist0[-1] = dist0[-2]
+
+        dist1[0] = dist1[1]
+        dist1[-1] = dist1[-2]
+
+        amp1 = np.sum(dist0.reshape((-1, 2)), 1) / np.sum(dist1.reshape((-1, 2)), 1)
+
+        field = amp0 * amp1 * np.exp(1j * ph)
+
+        return field, xout, amp0, amp1, ph, pnt, dist0, dist1
