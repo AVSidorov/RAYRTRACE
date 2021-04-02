@@ -55,8 +55,8 @@ class Ray:
             dy = n_field.dy[0]
 
             # convert to grid coordinates
-            x_cur = n_field.x_interpolant(self.x[0])
-            y_cur = n_field.y_interpolant(self.y[0])
+            x_cur = n_field.x2grid(self.x[0])
+            y_cur = n_field.y2grid(self.y[0])
 
             i = 0
             st = n_field.st

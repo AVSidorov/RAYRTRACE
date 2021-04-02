@@ -50,8 +50,8 @@ class Nfield:
         self.dn_y = (self.n[1:, :-1] - self.n[:-1, :-1]) / dyy
 
         # for conversion to grid coordinates
-        self.x_interpolant = interp1d(self.x, np.arange(0, self.nx))
-        self.y_interpolant = interp1d(self.y, np.arange(0, self.ny))
+        self.x2grid = interp1d(self.x, np.arange(0, self.nx))
+        self.y2grid = interp1d(self.y, np.arange(0, self.ny))
         self.n_interpolant = interp2d(self.x, self.y, self.n, kind='cubic')
 
         self.min_dxy = min(self.dx.min(), self.dy.min())
