@@ -54,9 +54,9 @@ class Nfield:
         self.dn_y = (self.n[1:, :-1] - self.n[:-1, :-1]) / dyy
 
         # for conversion to grid coordinates
-        self.x2grid = interp1d(self.x, np.arange(0, self.nx))
-        self.y2grid = interp1d(self.y, np.arange(0, self.ny))
-        self.n_interpolant = interp2d(self.x, self.y, self.n, kind='cubic')
+        self.x2grid = interp1d(self.x, np.arange(0, self.nx), fill_value='extrapolate')
+        self.y2grid = interp1d(self.y, np.arange(0, self.ny), fill_value='extrapolate')
+        self.n_interpolant = interp2d(self.x, self.y, self.n, kind='cubic', fill_value=1e12)
 
         self.min_dxy = min(self.dx.min(), self.dy.min())
         self.prep_raytrace()
@@ -80,4 +80,10 @@ class Nfield:
         # step determination
         a_max = max(np.max(abs(self.ax)), np.max(abs(self.ay)))
         b_max = w / c
-        self.st = min((-b_max + np.sqrt(b_max ** 2 + 4 * a_max * self.min_dxy)) / 2 / a_max, self.min_dxy * c / w)
+
+        if a_max == 0:
+            st_grad = np.inf
+        else:
+            st_grad = (-b_max + np.sqrt(b_max ** 2 + 4 * a_max * self.min_dxy)) / 2 / a_max
+
+        self.st = min(st_grad, self.min_dxy * c / w)
