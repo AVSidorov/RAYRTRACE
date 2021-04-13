@@ -12,12 +12,12 @@ class Beams(list):
 
     def append(self, *args, **kwargs) -> None:
         super().append(Beam(*args, **kwargs, n_field=self.n_field))
-
+        # TODO freq from nfield
 
 class Nfield:
 
     def __init__(self, den, *, nx=100, ny=100, x=None, y=None,
-                 len_unit='cm', den_unit='cm^-3'):
+                 freq=136.26e9, len_unit='cm', den_unit='cm^-3'):
 
         self.len_unit = len_unit
         self.den_unit = den_unit
@@ -37,10 +37,32 @@ class Nfield:
                 self.ny = len(self.y)
         elif isinstance(den, np.ndarray):
             if den.ndim == 2:
-                self.n = den
+                self.n = np.array(den, np.float64)
                 self.ny = den.shape[0]  # should be row number
                 self.nx = den.shape[1]
-        # TODO: interpolation density in given way by nx,ny x,y
+                if x is None:
+                    self.x = np.arange(self.nx)
+                else:
+                    # cast to ndarray
+                    x = np.atleast_1d(x)
+                    if len(x) != self.nx and x.size != den.size:
+                        # TODO raise exception
+                        return
+                    else:
+                        self.x = x
+
+                if y is None:
+                    self.y = np.arange(self.ny)
+                else:
+                    # cast to ndarray
+                    y = np.atleast_1d(y)
+                    if len(y) != self.ny and y.size != den.size:
+                        return
+                    else:
+                        self.y = y
+
+        # TODO: universal field inner state must be hidden. (2D grid should be stored inside 2D interpolant)
+        # TODO methods that return field in desired way (coordinate system, coordinates and so on)
         # TODO: units conversion
 
         # grid step
@@ -59,11 +81,11 @@ class Nfield:
         self.n_interpolant = interp2d(self.x, self.y, self.n, kind='cubic', fill_value=1e12)
 
         self.min_dxy = min(self.dx.min(), self.dy.min())
-        self.prep_raytrace()
+        self.prep_raytrace(freq=freq)
         self.beamsTX = Beams(self)
         self.beamsRX = Beams()
 
-    def prep_raytrace(self, freq=135e9):
+    def prep_raytrace(self, freq=136.26e9):
 
         self.freq = freq
 

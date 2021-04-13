@@ -8,12 +8,13 @@ from ray import Ray
 
 class Beam:
     _nfront = 1000  # settings for wavefront finder
-    _nray = 100  # default number of rays
-    _dist = 0.02  # default distance from focus for ray starts
+    _nray = 101  # default number of rays
+    _dist = 0.03  # default distance from focus for ray starts
     _ampbnd = 0.001  # default setting for width of rays start area determination
+    _gouy = 1  # Gouy phase switch
 
     def __init__(self, x0=0, y0=0, kx0=0, ky0=1,
-                 freq=136.268e9, waist=0.0035, focus=0.01,
+                 freq=136.268e9, waist=0.0035, focus=-0.01,
                  n_field=None,
                  freq_unit='Hz', length_unit='m'):
         self.x0 = x0  # antennae x
@@ -27,7 +28,7 @@ class Beam:
         self.freq_unit = freq_unit
         self.length_unit = length_unit
 
-        if n_field:
+        if not (n_field is None):
             self.rays(rnum=Beam._nray, dist=Beam._dist, ampbnd=Beam._ampbnd, n_field=n_field)
 
     @property
@@ -107,15 +108,15 @@ class Beam:
         return xl, yl
 
     # 2D field in vacuum
-    def field(self, *, x=np.array(0), y=np.array(0), coords=None, outfmt='field'):
+    def field(self, *, x=0, y=0, coords=None, outfmt='field'):
         # if x and y have same sizes (lengths) 1d field will be produced (@ (x,y) points)
         # otherwise result will be produced on grid
         # In case of desired result on a "square" grid, this grid should be given in input
         # otherwise result will be produced on diagonal of desired grid
 
-        # cast input in case if not default values are given
-        x = np.array(x)
-        y = np.array(y)
+        # cast input
+        x = np.atleast_1d(x)
+        y = np.atleast_1d(y)
 
         # coords have priority
         if coords:
@@ -135,6 +136,11 @@ class Beam:
         if len(x) != len(y):
             x, y = np.meshgrid(x, y)
 
+        # remove dims if x,y are vectors.
+        # If single value for one of coordinate is given, after meshgrid we have matrices with excess axis (size = 1)
+        x = np.squeeze(x)
+        y = np.squeeze(y)
+
         # Conversion to beam coordinates
         xx, yy = self.lab2beam(x, y)
 
@@ -151,12 +157,12 @@ class Beam:
         wa = w0 * np.sqrt(1. + yy ** 2 / y_r ** 2)  # beam width
         r = np.full_like(yy, np.inf)
         r[yy != 0] = yy[yy != 0] * (1. + y_r ** 2 / yy[yy != 0] ** 2)  # beam curvature radius
-        psi = np.arctan(yy / y_r)  # Gouy phase
+        psi = np.arctan(yy / y_r) / 2  # Gouy phase
 
         # x,y dependent parameters
-        amp = w0 / wa * np.exp(-xx ** 2 / wa ** 2)
-        phase = (2 * np.pi * yy / lw + np.pi * xx ** 2 / (r * lw) - psi)
-        field = amp * np.exp(1j * phase)
+        amp = np.sqrt(w0 / wa) * np.exp(-xx ** 2 / wa ** 2)
+        phase = (2 * np.pi * yy / lw + np.pi * xx ** 2 / (r * lw) - psi * Beam._gouy)
+        field = amp * np.exp(-1j * phase)
 
         if outfmt == 'field':
             return field
@@ -174,7 +180,7 @@ class Beam:
             return None
 
     # wavefront interpolant in beam coordinates
-    def _wavefront(self, dist=0.02, ampbnd=0.001):
+    def _wavefront(self, dist=0.003, ampbnd=0.001):
         # constants and parameters
         w0 = self.waist  # waist
         lw = self.wave_len  # wave length
@@ -183,23 +189,36 @@ class Beam:
         # xmax for grid
         # find x : A(x,dist)/A(0,dist) = ampbnd
         # y fixed = dist
-        xmax = np.sqrt(-w0 ** 2 * (1 + dist ** 2 / y_r ** 2) * np.log(ampbnd))
-
-        # make 2d grid for front line determination
+        xmax = np.sqrt(-w0 ** 2 * (1 + (dist / y_r) ** 2) * np.log(ampbnd))
         x = np.linspace(-xmax, xmax, Beam._nfront)
-        # TODO if ampbnd is very small y low border should be move toward beam focus
-        y = np.linspace(dist - lw, dist + lw, Beam._nfront)
-        xx, yy = np.meshgrid(x, y)
 
-        field_set = self._field(xx, yy, outfmt='dict')
+        # find R (wave front curvature) at dist
+        # It's necessary for determination grid size in y from xmax
+        r = dist * (1 + (y_r / dist) ** 2)
 
-        ph0 = 2 * np.pi * dist / lw - np.arctan(dist / y_r)  # phase on beam axis on dist from focus
-        contour = measure.find_contours(field_set['phase'], ph0)  # wavefront line in grid coordinates
-        ind2x = interp1d(np.arange(len(x)), x)
-        ind2y = interp1d(np.arange(len(y)), y)
+        # loop to avoid too short front. Front must have ends on left/right wall
+        nl = 1
+        ex = False
+        while not ex:
+            y = np.linspace(dist - np.sqrt(r ** 2 - xmax ** 2) - nl * lw, dist + nl * lw, Beam._nfront)
+            ind2x = interp1d(np.arange(len(x)), x)
+            ind2y = interp1d(np.arange(len(y)), y)
+
+            # make 2d grid for front line determination
+            xx, yy = np.meshgrid(x, y)
+
+            field_set = self._field(xx, yy, outfmt='dict')
+
+            ph0 = 2 * np.pi * dist / lw - np.arctan(
+                dist / y_r) / 2 * Beam._gouy  # phase on beam axis on dist from focus
+            contour = measure.find_contours(field_set['phase'], ph0)  # wavefront line in grid coordinates
+            if ind2x(contour[0][0, 1]) <= -xmax:
+                ex = True
+            else:
+                nl += 1
 
         # interpolant from x to y for wavefront in beam coordinates
-        wave_front = interp1d(ind2x(contour[0][:, 1]), ind2y(contour[0][:, 0]))
+        wave_front = interp1d(ind2x(contour[0][:, 1]), ind2y(contour[0][:, 0]), kind='cubic')
         return wave_front
 
     # wavefront in lab coordinates
@@ -208,7 +227,7 @@ class Beam:
         return self.beam2lab(wave_front.x, wave_front.y)
 
     # rays generator
-    def rays(self, rnum=100, dist=0.02, ampbnd=0.001, n_field=None):
+    def rays(self, rnum=101, dist=0.03, ampbnd=0.001, n_field=None):
 
         # constants and parameters
         w0 = self.waist  # waist
@@ -218,11 +237,11 @@ class Beam:
         # determinate nearest to dist y there phase = n * 2 * pi
         # number of periods
         # nl differs from number of wave lengths in dist due to Gouy phase
-        nl = np.floor(dist / lw - np.arctan(dist / y_r) / 2 / np.pi)
+        nl = np.floor(dist / lw - np.arctan(dist / y_r) / 2 * Beam._gouy / 2 / np.pi)
 
         # new corrected dist determination
         y = np.linspace((nl - 1) * lw, (nl + 1) * lw, 100)
-        n2y = interp1d(y / lw - np.arctan(y / y_r) / 2 / np.pi, y)
+        n2y = interp1d(y / lw - np.arctan(y / y_r) / 2 * Beam._gouy / 2 / np.pi, y)
         dist = n2y(nl)
 
         # getting interpolant of wavefront x to y
@@ -273,7 +292,7 @@ class Beam:
         if n_field:
             # coefficient for units conversion
             if self.length_unit == 'm':
-                k = 100
+                k = 100  # raytracing works in CGS
             else:
                 k = 1
 
@@ -286,14 +305,12 @@ class Beam:
     # 1D field obtained from rays
     def field_r(self, y, axis='y'):
 
+        if self.length_unit == 'm':
+            y = y * 100  # rays are in CGS
         # TODO parsing for x,y
 
-        amp0 = np.ndarray((0,))
-        ph = np.ndarray((0,))
+        amp0, ph, dist0, dist1, xout = (np.ndarray((0,)) for _ in range(5))
         pnt = np.ndarray((0,), dtype=int)
-        dist0 = np.ndarray((0,))
-        dist1 = np.ndarray((0,))
-        xout = np.ndarray((0,))
 
         for rm, rl, rr in zip(self._rays, np.roll(self._rays, 1), np.roll(self._rays, -1)):
 
@@ -326,8 +343,10 @@ class Beam:
         dist1[0] = dist1[1]
         dist1[-1] = dist1[-2]
 
-        amp1 = np.sum(dist0.reshape((-1, 2)), 1) / np.sum(dist1.reshape((-1, 2)), 1)
+        # For straight rays distance between points increases as 1/R
+        # but in 2D case field amplitude decreases with distance as 1/sqrt(R)
+        amp1 = np.sqrt(np.sum(dist0.reshape((-1, 2)), 1) / np.sum(dist1.reshape((-1, 2)), 1))
 
-        field = amp0 * amp1 * np.exp(1j * ph)
+        field = amp0 * amp1 * np.exp(-1j * ph)
 
         return field, xout, amp0, amp1, ph, pnt, dist0, dist1

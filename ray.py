@@ -13,6 +13,9 @@ class Ray:
     traceType = 'c'
 
     def __init__(self, x0=0, y0=0, kx0=0, ky0=1, freq=135e9, amp=1, n_field=None):
+
+        self.len_unit = 'cm'  # raytracing works in CGS (simple critical density calculation)
+
         self.x = np.zeros(Ray.MaxStep)
         self.y = np.zeros(Ray.MaxStep)
         self.kx = np.zeros(Ray.MaxStep)
