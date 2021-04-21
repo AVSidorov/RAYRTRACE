@@ -14,6 +14,23 @@ class Beams(list):
         super().append(Beam(*args, **kwargs, n_field=self.n_field))
         # TODO freq from nfield
 
+
+def critical_den(freq=136.29e9, den_unit='cm^-3'):
+    # constants
+    # working in CGS so additional multipliers should be used
+    w = 2 * np.pi * freq
+    c = const.speed_of_light * 100
+    e = 4.8032e-10
+
+    k = 1
+    if den_unit == 'cm^-3':
+        k = 1
+    elif den_unit == 'm^-3':
+        k = 1e6
+
+    return k * const.electron_mass * 1000 * w ** 2 / (4 * np.pi * e ** 2)
+
+
 class Nfield:
 
     def __init__(self, den, *, nx=100, ny=100, x=None, y=None,
@@ -85,20 +102,28 @@ class Nfield:
         self.beamsTX = Beams(self)
         self.beamsRX = Beams()
 
-    def prep_raytrace(self, freq=136.26e9):
+    def refractive_index(self, freq=136.26e9, x=None, y=None):
+        if x is None or y is None:
+            den = self.n[0, 0]  # take density at boundary
+        else:
+            den = self.n_interpolant(x, y)
+        nc = critical_den(freq, den_unit=self.den_unit)
+        return np.sqrt(1 - den / nc)
 
+    def prep_raytrace(self, freq=136.26e9):
+        # TODO separate class for arrays necessary for  raytracing
         self.freq = freq
 
         # constants
         # working in CGS so additional multipliers should be used
         w = 2 * np.pi * self.freq
         c = const.speed_of_light * 100
-        e = 4.8032e-10
-        self.nc = const.electron_mass * 1000 * w ** 2 / (4 * np.pi * e ** 2)
+        nc = critical_den(freq, den_unit=self.den_unit)
 
-        self.ax = -self.dn_x / 2 / self.nc * w ** 2 / c ** 2
-        self.ay = -self.dn_y / 2 / self.nc * w ** 2 / c ** 2
+        self.ax = -self.dn_x / 2 / nc * (w / c) ** 2
+        self.ay = -self.dn_y / 2 / nc * (w / c) ** 2
 
+        # TODO variable step (for each cell)
         # step determination
         a_max = max(np.max(abs(self.ax)), np.max(abs(self.ay)))
         b_max = w / c

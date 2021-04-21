@@ -59,7 +59,7 @@ class Ray:
         # launch ray if density is given
         if not (n_field is None):
             # change wave vector corresponding to local density
-            refr = np.sqrt(1 - n_field.n_interpolant(self.x[0], self.y[0]) / n_field.nc)
+            refr = n_field.refractive_index(freq=self.freq, x=self.x[0], y=self.y[0])
             self.kx[0] = self.kx[0] * refr
             self.ky[0] = self.ky[0] * refr
 

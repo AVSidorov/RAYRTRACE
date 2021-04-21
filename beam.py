@@ -1,9 +1,18 @@
 import numpy as np
 from scipy import constants as const
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, interp2d
 from skimage import measure
 
 from ray import Ray
+
+
+class Front:
+    def __init__(self, x0=0, y0=0, curvature=np.inf, wa=0.0035, len_unit='m'):
+        self.x0 = x0
+        self.y0 = y0
+
+        self.r = curvature
+        self.wa = wa
 
 
 class Beam:
@@ -29,11 +38,11 @@ class Beam:
         self.length_unit = length_unit
 
         if not (n_field is None):
-            self.rays(rnum=Beam._nray, dist=Beam._dist, ampbnd=Beam._ampbnd, n_field=n_field)
+            self.rays(rnum=Beam._nray, wave_front=None, dist=Beam._dist, ampbnd=Beam._ampbnd, n_field=n_field)
 
     @property
     def wave_len(self):
-        return const.speed_of_light / self.freq  # wave length
+        return const.speed_of_light / self.freq  # vacuum wave length
 
     @wave_len.setter
     def wave_len(self, lw):
@@ -67,11 +76,11 @@ class Beam:
             self._kx0 = self._kx0 / abs(self._kx0) * np.sqrt(1 - ky ** 2)
 
     @property
-    def k(self):
+    def k0(self):
         return self._kx0, self._ky0
 
-    @k.setter
-    def k(self, k=(0, 1)):
+    @k0.setter
+    def k0(self, k=(0, 1)):
         knorm = np.linalg.norm(k)
         self._kx0 = k[0] / knorm
         self._ky0 = k[1] / knorm
@@ -107,8 +116,11 @@ class Beam:
 
         return xl, yl
 
-    # 2D field in vacuum
-    def field(self, *, x=0, y=0, coords=None, outfmt='field'):
+    def rayleigh_len(self, n=1.):
+        return np.pi * self.waist ** 2 * n / self.wave_len
+
+    # 2D analytical field
+    def field(self, *, x=0, y=0, coords=None, n=1., outfmt='field'):
         # if x and y have same sizes (lengths) 1d field will be produced (@ (x,y) points)
         # otherwise result will be produced on grid
         # In case of desired result on a "square" grid, this grid should be given in input
@@ -144,14 +156,14 @@ class Beam:
         # Conversion to beam coordinates
         xx, yy = self.lab2beam(x, y)
 
-        return self._field(xx, yy, outfmt=outfmt)
+        return self._field(xx, yy, n=n, outfmt=outfmt)
 
-    # 2D vacuum field in beam coordinates
-    def _field(self, xx, yy, outfmt='field'):
+    # 2D analytical field in beam coordinates
+    def _field(self, xx, yy, n=1., outfmt='field'):
         # constants and parameters
         w0 = self.waist  # waist
-        lw = const.speed_of_light / self.freq  # wave length
-        y_r = np.pi * w0 ** 2 / lw  # Rayleigh length
+        lw = self.wave_len  # vacuum wave length
+        y_r = self.rayleigh_len(n=n)  # Rayleigh length
 
         # y dependent parameters
         wa = w0 * np.sqrt(1. + yy ** 2 / y_r ** 2)  # beam width
@@ -161,7 +173,7 @@ class Beam:
 
         # x,y dependent parameters
         amp = np.sqrt(w0 / wa) * np.exp(-xx ** 2 / wa ** 2)
-        phase = (2 * np.pi * yy / lw + np.pi * xx ** 2 / (r * lw) - psi * Beam._gouy)
+        phase = (2 * np.pi * yy * n / lw + np.pi * xx ** 2 / (r * lw) - psi * Beam._gouy)
         field = amp * np.exp(-1j * phase)
 
         if outfmt == 'field':
@@ -180,11 +192,11 @@ class Beam:
             return None
 
     # wavefront interpolant in beam coordinates
-    def _wavefront(self, dist=0.003, ampbnd=0.001):
+    def _wavefront(self, dist=0.003, ampbnd=0.001, n=1.):
         # constants and parameters
         w0 = self.waist  # waist
         lw = self.wave_len  # wave length
-        y_r = np.pi * w0 ** 2 / lw  # Rayleigh length
+        y_r = self.rayleigh_len(n=n)  # Rayleigh length
 
         # xmax for grid
         # find x : A(x,dist)/A(0,dist) = ampbnd
@@ -207,9 +219,9 @@ class Beam:
             # make 2d grid for front line determination
             xx, yy = np.meshgrid(x, y)
 
-            field_set = self._field(xx, yy, outfmt='dict')
+            field_set = self._field(xx, yy, n=n, outfmt='dict')
 
-            ph0 = 2 * np.pi * dist / lw - np.arctan(
+            ph0 = 2 * np.pi * dist * n / lw - np.arctan(
                 dist / y_r) / 2 * Beam._gouy  # phase on beam axis on dist from focus
             contour = measure.find_contours(field_set['phase'], ph0)  # wavefront line in grid coordinates
             if ind2x(contour[0][0, 1]) <= -xmax:
@@ -222,30 +234,37 @@ class Beam:
         return wave_front
 
     # wavefront in lab coordinates
-    def wavefront(self, dist=0.02, ampbnd=0.001):
-        wave_front = self._wavefront(dist, ampbnd)
+    def wavefront(self, dist=0.02, ampbnd=0.001, n=1.):
+        wave_front = self._wavefront(dist, ampbnd, n=n)
         return self.beam2lab(wave_front.x, wave_front.y)
 
-    # rays generator
-    def rays(self, rnum=101, dist=0.03, ampbnd=0.001, n_field=None):
-
+    # wave front for rays generator
+    def wavefront_r(self, dist=0.03, ampbnd=0.001, n_field=None):
         # constants and parameters
-        w0 = self.waist  # waist
+        if n_field is None:
+            n = 1.  # index of refraction
+        else:
+            n = n_field.refractive_index(freq=self.freq)
         lw = self.wave_len  # wave length
-        y_r = np.pi * w0 ** 2 / lw  # Rayleigh length
+        y_r = self.rayleigh_len(n=n)  # Rayleigh length
 
         # determinate nearest to dist y there phase = n * 2 * pi
         # number of periods
         # nl differs from number of wave lengths in dist due to Gouy phase
-        nl = np.floor(dist / lw - np.arctan(dist / y_r) / 2 * Beam._gouy / 2 / np.pi)
+        nl = np.floor(n * dist / lw - Beam._gouy * np.arctan(dist / y_r) / 2 / 2 / np.pi)
 
         # new corrected dist determination
         y = np.linspace((nl - 1) * lw, (nl + 1) * lw, 100)
-        n2y = interp1d(y / lw - np.arctan(y / y_r) / 2 * Beam._gouy / 2 / np.pi, y)
+        n2y = interp1d(n * y / lw - Beam._gouy * np.arctan(y / y_r) / 2 / 2 / np.pi, y)
         dist = n2y(nl)
 
         # getting interpolant of wavefront x to y
-        wave_front = self._wavefront(dist, ampbnd)
+        return self._wavefront(dist, ampbnd, n=n)
+
+    def rays(self, rnum=101, wave_front=None, dist=0.03, ampbnd=0.001, n_field=None):
+
+        if wave_front is None:
+            wave_front = self.wavefront_r(dist=dist, ampbnd=ampbnd, n_field=n_field)
 
         # make equidistant ray start points
         # length axis
@@ -284,7 +303,7 @@ class Beam:
         kx = kx[::int(len(kx) / rnum)]
         ky = ky[::int(len(ky) / rnum)]
 
-        field_set = self.field(x=x, y=y, outfmt='dict')
+        field_set = self.field(x=x, y=y, n=n, outfmt='dict')
 
         amps = field_set['amp']
         phase = field_set['phase']  # for check
@@ -350,3 +369,60 @@ class Beam:
         field = amp0 * amp1 * np.exp(-1j * ph)
 
         return field, xout, amp0, amp1, ph, pnt, dist0, dist1
+
+
+def beam_from_field(field, x, y, dist=0.03, ampbnd=0.01):
+    # normalize field
+    field = field / np.max(np.abs(field).flatten())
+
+    # working in grid coordinates (dimensionless)
+    # grid coordinates
+    xi = range(len(x))
+    yi = range(len(y))
+
+    # amplitude interpolant
+    fieldAbs = interp2d(xi, yi, np.abs(field))
+
+    yi_max, xi_max = np.unravel_index(np.argmax(np.abs(field)), field.shape)
+
+    # find fronts
+    fronts = measure.find_contours(np.angle(field), 0)
+    full_fronts = np.ndarray((0, 3))
+
+    for ind in range(len(fronts)):
+        amp = np.abs(field[np.round(fronts[ind][:, 0]).astype(np.int64),
+                           np.round(fronts[ind][:, 1]).astype(np.int64)]).flatten()
+        fronts[ind] = np.delete(fronts[ind], amp / amp.max() < ampbnd, 0)
+        amp = np.delete(amp, amp / amp.max() < ampbnd, 0)
+        full_fronts = np.vstack((full_fronts, np.hstack((fronts[ind], np.atleast_2d(amp).T))))
+
+    full_fronts = full_fronts[:, [1, 0, 2]]
+    yimax, ximax = np.where(
+        np.logical_and(np.logical_and(field.real >= np.roll(field.real, 1, 0),
+                                      field.real >= np.roll(field.real, -1, 0)),
+                       np.logical_and(field.real >= np.roll(field.real, 1, 1),
+                                      field.real >= np.roll(field.real, -1, 1))))
+    # amplitudes at maxima
+    ampmax = np.abs(field[yimax, ximax]).flatten()
+    index = np.argsort(1 / ampmax)
+    ampmax = ampmax[index]
+    ximax = ximax[index]
+    yimax = yimax[index]
+
+    yimin, ximin = np.where(
+        np.logical_and(np.logical_and(field.real <= np.roll(field.real, 1, 0),
+                                      field.real <= np.roll(field.real, -1, 0)),
+                       np.logical_and(field.real <= np.roll(field.real, 1, 1),
+                                      field.real <= np.roll(field.real, -1, 1))))
+
+
+def points2circle(a, b, c):
+    a2 = np.dot(a, a)
+    b2 = np.dot(b, b)
+    c2 = np.dot(c, c)
+    d = np.cross(a - b, a - c)
+    if d == 0:
+        return np.nan
+    e = a * (b2 - c2) + b * (c2 - a2) + c * (a2 - b2)
+    r = np.array((-e[1] / d / 2, e[0] / d / 2))
+    return r
