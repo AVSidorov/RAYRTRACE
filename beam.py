@@ -303,7 +303,7 @@ class Beam:
         kx = kx[::int(len(kx) / rnum)]
         ky = ky[::int(len(ky) / rnum)]
 
-        field_set = self.field(x=x, y=y, n=n, outfmt='dict')
+        field_set = self.field(x=x, y=y, n=n_field.refractive_index(freq=self.freq), outfmt='dict')
 
         amps = field_set['amp']
         phase = field_set['phase']  # for check
