@@ -1,6 +1,6 @@
 import numpy as np
 from scipy import constants as const
-from scipy.interpolate import interp1d, interp2d
+from scipy.interpolate import interp1d, interp2d, griddata
 
 from beam import Beam
 
@@ -134,3 +134,79 @@ class Nfield:
             st_grad = (-b_max + np.sqrt(b_max ** 2 + 4 * a_max * self.min_dxy)) / 2 / a_max
 
         self.st = min(st_grad, self.min_dxy * c / w)
+
+
+def rxyten2grid(rxyten: np.ndarray, nx=None, ny=None, xdim=None, ydim=None):
+    n_theta_max = 1000
+
+    nr = len(rxyten)
+    if nx is None:
+        nx = nr
+
+    if ny is None:
+        ny = nx
+
+    rxyten = rxyten[rxyten[:, 0].argsort(), :]
+    grid_step = np.diff(rxyten[:, 0]).min()
+    n_theta = np.round(2 * np.pi * rxyten[:, 0].max() / grid_step).astype(np.int64)
+    n_theta = min(n_theta_max, n_theta)
+
+    theta = np.linspace(0, 2 * np.pi, n_theta + 1)
+    theta = theta[:-1]
+
+    n, _ = np.meshgrid(rxyten[:, -1], theta)
+    r, theta = np.meshgrid(rxyten[:, 0], theta)
+
+    xx = rxyten[:, 1] + r * (np.cos(theta) - rxyten[:, 3] * np.sin(theta) ** 2)
+    yy = rxyten[:, 2] + r * rxyten[:, 4] * np.sin(theta)
+
+    # check that surfaces are nested
+    inout = 1
+    for ri in range(nr - 1):
+        inout *= -check_inside((xx[:, ri] - rxyten[ri, 1], yy[:, ri] - rxyten[ri, 2]),
+                               (xx[:, ri + 1] - rxyten[ri, 1], yy[:, ri + 1] - rxyten[ri, 2]))
+
+    if inout != 1:
+        return None
+
+    # make regular rectangular grid
+
+    if xdim is None:
+        x = np.linspace(xx.min(), xx.max(), nx)
+    else:
+        x = np.linspace(-xdim / 2, xdim / 2, nx)
+
+    if ydim is None:
+        y = np.linspace(yy.min(), yy.max(), ny)
+    else:
+        y = np.linspace(-ydim / 2, ydim / 2, nx)
+
+    x,y = np.meshgrid(x, y)
+
+    n = griddata((xx.flatten(), yy.flatten()), n.flatten(), (x, y),
+                 method='cubic', fill_value=rxyten[:, -1].min())
+
+    return n, np.squeeze(x[0, :]),np.squeeze(y[:, 0])
+
+
+def check_inside(a, b):
+    # for this algorithm origin must be inside of convex contour
+    # for working in polar coordinates make complex numbers
+    a = a[0] + 1j * a[1]
+    b = b[0] + 1j * b[1]
+
+    a = a[np.argsort(np.angle(a))]
+    b = b[np.argsort(np.angle(b))]
+
+    ang2rho = interp1d(np.angle(b), np.abs(b), kind='cubic', bounds_error=False,
+                       fill_value=(np.abs(b[0]), np.abs(b[-1])))
+
+    # radius coordinates of "b" on same angels as in "a"
+    rb = ang2rho(np.angle(a))
+
+    if all(np.abs(a) < rb):
+        return -1  # a is inside b
+    elif all(np.abs(a) > rb):
+        return 1  # a is outside b
+    else:
+        return 0
