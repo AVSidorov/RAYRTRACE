@@ -136,57 +136,103 @@ class Nfield:
         self.st = min(st_grad, self.min_dxy * c / w)
 
 
-def rxyten2grid(rxyten: np.ndarray, nx=None, ny=None, xdim=None, ydim=None):
-    n_theta_max = 1000
+class RXYTEN:
+    _n_theta_max = 1000
 
-    nr = len(rxyten)
-    if nx is None:
-        nx = nr
+    def __init__(self, r, x=None, y=None, tria=None, elon=None, den=None):
+        if isinstance(r, np.ndarray):
+            if r.ndim == 2:
+                if r.shape[1] == 6:
+                    r, x, y, tria, elon, den = (r[:, i] for i in range(6))
+        ind = np.argsort(r)
+        self.r = r[ind]
+        self.x = x[ind]
+        self.y = y[ind]
+        self.tria = tria[ind]
+        self.elon = elon[ind]
+        self.den = den[ind]
 
-    if ny is None:
-        ny = nx
+    def on_self_polar(self, theta=None):
 
-    rxyten = rxyten[rxyten[:, 0].argsort(), :]
-    grid_step = np.diff(rxyten[:, 0]).min()
-    n_theta = np.round(2 * np.pi * rxyten[:, 0].max() / grid_step).astype(np.int64)
-    n_theta = min(n_theta_max, n_theta)
+        if theta is None:
+            grid_step = np.diff(self.r).min()
+            theta = np.round(2 * np.pi * self.r.max() / grid_step).astype(np.int64)
+            theta = min(RXYTEN._n_theta_max, theta)
 
-    theta = np.linspace(0, 2 * np.pi, n_theta + 1)
-    theta = theta[:-1]
+        if isinstance(theta, (int, np.int64)):
+            n_theta = theta
+            theta = np.linspace(0, 2*np.pi, n_theta+1)[:-1]
 
-    n, _ = np.meshgrid(rxyten[:, -1], theta)
-    r, theta = np.meshgrid(rxyten[:, 0], theta)
+        den, _ = np.meshgrid(self.den, theta)
+        r, theta = np.meshgrid(self.r, theta)
 
-    xx = rxyten[:, 1] + r * (np.cos(theta) - rxyten[:, 3] * np.sin(theta) ** 2)
-    yy = rxyten[:, 2] + r * rxyten[:, 4] * np.sin(theta)
+        return den, r, theta
 
-    # check that surfaces are nested
-    inout = 1
-    for ri in range(nr - 1):
-        inout *= -check_inside((xx[:, ri] - rxyten[ri, 1], yy[:, ri] - rxyten[ri, 2]),
-                               (xx[:, ri + 1] - rxyten[ri, 1], yy[:, ri + 1] - rxyten[ri, 2]))
+    def on_self_cartesian(self, theta=None):
+        den, r, theta = self.on_self_polar(theta=theta)
+        xx = self.x + r * (np.cos(theta) - self.tria * np.sin(theta)**2)
+        yy = self.y + r * self.elon * np.sin(theta)
 
-    if inout != 1:
-        return None
+        return den, xx, yy
 
-    # make regular rectangular grid
+    @property
+    def nested(self):
+        _, xx, yy = self.on_self_cartesian()
+        inout = 1
+        for ri in range(len(self.r) - 1):
+            inout *= -check_inside((xx[:, ri] - self.x[ri], yy[:, ri] - self.y[ri]),
+                                   (xx[:, ri + 1] - self.x[ri], yy[:, ri + 1] - self.y[ri]))
+        if inout == 1:
+            return True
+        else:
+            return False
 
-    if xdim is None:
-        x = np.linspace(xx.min(), xx.max(), nx)
-    else:
-        x = np.linspace(-xdim / 2, xdim / 2, nx)
+    def on_grid(self, *, x=None, y=None, nx=None, ny=None, xdim=None, ydim=None):
 
-    if ydim is None:
-        y = np.linspace(yy.min(), yy.max(), ny)
-    else:
-        y = np.linspace(-ydim / 2, ydim / 2, nx)
+        den, xx, yy = self.on_self_cartesian()
 
-    x,y = np.meshgrid(x, y)
+        x = np.atleast_1d(x)
+        y = np.atleast_1d(y)
 
-    n = griddata((xx.flatten(), yy.flatten()), n.flatten(), (x, y),
-                 method='cubic', fill_value=rxyten[:, -1].min())
+        if not(x is None):
+            if x.ndim == 1:
+                nx = len(x)
+                xdim = x[-1]-x[0]
+            elif x.ndim >= 1:
+                nx = x.shape[1]
+                xdim = x[0, -1] - x[0, 0]
 
-    return n, np.squeeze(x[0, :]),np.squeeze(y[:, 0])
+        if not(y is None):
+            if y.ndim == 1:
+                ny = len(y)
+                ydim = y[-1] - y[0]
+            elif y.ndim >= 1:
+                ny = y.shape[0]
+                ydim = y[-1, 0] - y[0, 0]
+
+        if nx is None:
+            nx = len(self.r)
+
+        if ny is None:
+            ny = nx
+
+        if xdim is None:
+            x = np.linspace(xx.min(), xx.max(), nx)
+        elif x is None:
+            x = np.linspace(-xdim / 2, xdim / 2, nx)
+
+        if ydim is None:
+            y = np.linspace(yy.min(), yy.max(), ny)
+        elif y is None:
+            y = np.linspace(-ydim / 2, ydim / 2, nx)
+
+        if x.ndim == 1:
+            x, y = np.meshgrid(x, y)
+
+        n = griddata((xx.flatten(), yy.flatten()), den.flatten(), (x, y),
+                     method='cubic', fill_value=self.den.min())
+
+        return n, x, y
 
 
 def check_inside(a, b):
