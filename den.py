@@ -187,14 +187,12 @@ class RXYTEN:
         else:
             return False
 
-    def on_grid(self, *, x=None, y=None, nx=None, ny=None, xdim=None, ydim=None):
+    def on_grid(self, *, x=None, y=None, nx=None, ny=None, xdim=None, ydim=None, theta=None):
 
-        den, xx, yy = self.on_self_cartesian()
-
-        x = np.atleast_1d(x)
-        y = np.atleast_1d(y)
+        den, xx, yy = self.on_self_cartesian(theta=theta)
 
         if not(x is None):
+            x = np.atleast_1d(x)
             if x.ndim == 1:
                 nx = len(x)
                 xdim = x[-1]-x[0]
@@ -203,6 +201,7 @@ class RXYTEN:
                 xdim = x[0, -1] - x[0, 0]
 
         if not(y is None):
+            y = np.atleast_1d(y)
             if y.ndim == 1:
                 ny = len(y)
                 ydim = y[-1] - y[0]
@@ -226,13 +225,54 @@ class RXYTEN:
         elif y is None:
             y = np.linspace(-ydim / 2, ydim / 2, nx)
 
-        if x.ndim == 1:
+        if x.size != y.size or xdim is None:
             x, y = np.meshgrid(x, y)
 
         n = griddata((xx.flatten(), yy.flatten()), den.flatten(), (x, y),
                      method='cubic', fill_value=self.den.min())
 
-        return n, x, y
+        return np.squeeze(n), np.squeeze(x), np.squeeze(y)
+
+    def on_polar(self, *, r=None, theta=None):
+
+        if not(r is None) and not(theta is None):
+            if isinstance(theta, (int, np.int64)):
+                theta = np.linspace(0, 2*np.pi, theta+1)[:-1]
+
+            r = np.atleast_1d(r)
+            theta = np.atleast_1d(theta)
+            if r.size != theta.size:
+                r, theta = np.meshgrid(r, theta)
+
+            x = np.squeeze(r * np.cos(theta))
+            y = np.squeeze(r * np.sin(theta))
+        else:
+            x = None
+            y = None
+
+        den, x, y = self.on_grid(x=x, y=y, theta=theta)
+
+        # to complex
+        vec = x + 1j*y
+
+        return den, np.abs(vec), np.angle(vec), x, y
+
+    def r_lcs(self, limiter):
+        n = self.den
+        self.den = self.r
+        if np.isscalar(limiter):
+            _,_,theta = self.on_self_polar()
+            rho, r, theta, x, y = self.on_polar(r=limiter, theta=theta)
+        # TODO limiter as curve
+
+        ind = np.argmin(rho)
+
+        self.den = n
+        return rho[ind], x[ind], y[ind], theta[ind]
+
+
+
+
 
 
 def check_inside(a, b):
