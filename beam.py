@@ -7,10 +7,13 @@ from ray import Ray
 
 
 class Front:
-    def __init__(self, x0=0, y0=0, curvature=np.inf, wa=0.0035, len_unit='m'):
+    def __init__(self, x0=np.nan, y0=np.nan, curvature=np.inf, wa=0.0035, len_unit='m'):
         self.x0 = x0
         self.y0 = y0
-
+        self.amp = np.nan
+        self.dist = np.nan
+        self.dist_min = np.nan
+        self.dist_max = np.nan
         self.r = curvature
         self.wa = wa
 
@@ -18,14 +21,14 @@ class Front:
 class Beam:
     _nfront = 1000  # settings for wavefront finder
     _nray = 101  # default number of rays
-    _dist = 0.03  # default distance from focus for ray starts
+    _dist = 3  # default distance from focus for ray starts
     _ampbnd = 0.001  # default setting for width of rays start area determination
     _gouy = 1  # Gouy phase switch
 
     def __init__(self, x0=0, y0=0, kx0=0, ky0=1,
-                 freq=136.268e9, waist=0.0035, focus=-0.01,
+                 freq=136.268e9, waist=0.35, focus=-1,
                  n_field=None,
-                 freq_unit='Hz', length_unit='m'):
+                 freq_unit='Hz', length_unit='cm'):
         self.x0 = x0  # antennae x
         self.y0 = y0  # antennae y
         self._kx0 = kx0
@@ -42,12 +45,22 @@ class Beam:
 
     @property
     def wave_len(self):
-        return const.speed_of_light / self.freq  # vacuum wave length
+        if self.length_unit == 'm':
+            k = 1
+        elif self.length_unit == 'cm':
+            k = 100
+
+        return k * const.speed_of_light / self.freq  # vacuum wave length
 
     @wave_len.setter
     def wave_len(self, lw):
+        if self.length_unit == 'm':
+            k = 1
+        elif self.length_unit == 'cm':
+            k = 100
+
         if 0 < lw < 0.1:
-            self.freq = const.speed_of_light / lw
+            self.freq = k * const.speed_of_light / lw
 
     @property
     def kx0(self):
@@ -261,7 +274,15 @@ class Beam:
         # getting interpolant of wavefront x to y
         return self._wavefront(dist, ampbnd, n=n)
 
-    def rays(self, rnum=101, wave_front=None, dist=0.03, ampbnd=0.001, n_field=None):
+    def rays(self, rnum=None, wave_front=None, dist=None, ampbnd=None, n_field=None):
+        if rnum is None:
+            rnum = Beam._nray
+
+        if dist is None:
+            dist = Beam._dist
+
+        if ampbnd is None:
+            ampbnd = Beam._ampbnd
 
         if wave_front is None:
             wave_front = self.wavefront_r(dist=dist, ampbnd=ampbnd, n_field=n_field)
@@ -303,7 +324,7 @@ class Beam:
         kx = kx[::int(len(kx) / rnum)]
         ky = ky[::int(len(ky) / rnum)]
 
-        field_set = self.field(x=x, y=y, n=n, outfmt='dict')
+        field_set = self.field(x=x, y=y, n=n_field.refractive_index(freq=self.freq), outfmt='dict')
 
         amps = field_set['amp']
         phase = field_set['phase']  # for check
@@ -367,6 +388,15 @@ class Beam:
         amp1 = np.sqrt(np.sum(dist0.reshape((-1, 2)), 1) / np.sum(dist1.reshape((-1, 2)), 1))
 
         field = amp0 * amp1 * np.exp(-1j * ph)
+        ind = np.argsort(xout)
+        xout = xout[ind]
+        field = field[ind]
+        amp0 = amp0[ind]
+        amp1 = amp1[ind]
+        ph = ph[ind]
+        pnt = pnt[ind]
+        dist0 = dist0[ind]
+        dist1 = dist1[ind]
 
         return field, xout, amp0, amp1, ph, pnt, dist0, dist1
 
@@ -381,40 +411,28 @@ def beam_from_field(field, x, y, dist=0.03, ampbnd=0.01):
     yi = range(len(y))
 
     # amplitude interpolant
-    fieldAbs = interp2d(xi, yi, np.abs(field))
+    field_abs = interp2d(xi, yi, np.abs(field))
 
     yi_max, xi_max = np.unravel_index(np.argmax(np.abs(field)), field.shape)
 
     # find fronts
     fronts = measure.find_contours(np.angle(field), 0)
+
+    # analyze and sort fronts
     full_fronts = np.ndarray((0, 3))
 
     for ind in range(len(fronts)):
         amp = np.abs(field[np.round(fronts[ind][:, 0]).astype(np.int64),
                            np.round(fronts[ind][:, 1]).astype(np.int64)]).flatten()
-        fronts[ind] = np.delete(fronts[ind], amp / amp.max() < ampbnd, 0)
-        amp = np.delete(amp, amp / amp.max() < ampbnd, 0)
-        full_fronts = np.vstack((full_fronts, np.hstack((fronts[ind], np.atleast_2d(amp).T))))
+
+        if amp.max() >= ampbnd:
+            full_fronts = np.vstack((full_fronts, np.hstack((fronts[ind], np.atleast_2d(amp).T))))
 
     full_fronts = full_fronts[:, [1, 0, 2]]
-    yimax, ximax = np.where(
-        np.logical_and(np.logical_and(field.real >= np.roll(field.real, 1, 0),
-                                      field.real >= np.roll(field.real, -1, 0)),
-                       np.logical_and(field.real >= np.roll(field.real, 1, 1),
-                                      field.real >= np.roll(field.real, -1, 1))))
-    # amplitudes at maxima
-    ampmax = np.abs(field[yimax, ximax]).flatten()
-    index = np.argsort(1 / ampmax)
-    ampmax = ampmax[index]
-    ximax = ximax[index]
-    yimax = yimax[index]
 
-    yimin, ximin = np.where(
-        np.logical_and(np.logical_and(field.real <= np.roll(field.real, 1, 0),
-                                      field.real <= np.roll(field.real, -1, 0)),
-                       np.logical_and(field.real <= np.roll(field.real, 1, 1),
-                                      field.real <= np.roll(field.real, -1, 1))))
-
+    return full_fronts
+    # ind_max, props_max = find_peaks(full_fronts[:, 2])
+    # ind_min,props_min = find_peaks(-full_fronts[:, 2])
 
 def points2circle(a, b, c):
     a2 = np.dot(a, a)
