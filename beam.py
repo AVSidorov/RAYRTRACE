@@ -1,6 +1,6 @@
 import numpy as np
 from scipy import constants as const
-from scipy.interpolate import interp1d, interp2d
+from scipy.interpolate import interp1d
 from skimage import measure
 
 from ray import Ray
@@ -400,39 +400,6 @@ class Beam:
 
         return field, xout, amp0, amp1, ph, pnt, dist0, dist1
 
-
-def beam_from_field(field, x, y, dist=0.03, ampbnd=0.01):
-    # normalize field
-    field = field / np.max(np.abs(field).flatten())
-
-    # working in grid coordinates (dimensionless)
-    # grid coordinates
-    xi = range(len(x))
-    yi = range(len(y))
-
-    # amplitude interpolant
-    field_abs = interp2d(xi, yi, np.abs(field))
-
-    yi_max, xi_max = np.unravel_index(np.argmax(np.abs(field)), field.shape)
-
-    # find fronts
-    fronts = measure.find_contours(np.angle(field), 0)
-
-    # analyze and sort fronts
-    full_fronts = np.ndarray((0, 3))
-
-    for ind in range(len(fronts)):
-        amp = np.abs(field[np.round(fronts[ind][:, 0]).astype(np.int64),
-                           np.round(fronts[ind][:, 1]).astype(np.int64)]).flatten()
-
-        if amp.max() >= ampbnd:
-            full_fronts = np.vstack((full_fronts, np.hstack((fronts[ind], np.atleast_2d(amp).T))))
-
-    full_fronts = full_fronts[:, [1, 0, 2]]
-
-    return full_fronts
-    # ind_max, props_max = find_peaks(full_fronts[:, 2])
-    # ind_min,props_min = find_peaks(-full_fronts[:, 2])
 
 def points2circle(a, b, c):
     a2 = np.dot(a, a)
