@@ -352,6 +352,43 @@ class Beam:
         amp0, ph, dist0, dist1, xout = (np.ndarray((0,)) for _ in range(5))
         pnt = np.ndarray((0,), dtype=int)
 
+        """ Rays classification by intersection"""
+        # prepare rays
+        for r in self._rays:
+            ind = r.addpoint(y, axis=axis)
+            if len(ind) > 1:
+                return None
+
+            pnt = np.append(pnt, ind)
+            ph = np.append(ph, r.ph[ind])
+            xout = np.append(xout, r.x[ind])
+
+        # TODO check or perform sorting rays by X
+        cur_page = 0
+        pages = [np.atleast_1d(0),]
+        while cur_page < len(pages):
+            ind = pages[cur_page][-1] + 1
+            while ind < len(self._rays):
+                # It assumes rays are sorted by X
+                if xout[ind] > xout[pages[cur_page][-1]]:   # add current point to current page
+                    inset = False
+                    for page in pages:
+                        inset = inset or (ind in page)
+                    if not inset:
+                        pages[cur_page] = np.append(pages[cur_page], ind)
+                elif cur_page+1 == len(pages):      # if new page not exist add new page with current ray index
+                    pages.append(np.atleast_1d(ind))
+                ind += 1
+            cur_page += 1
+
+        ind = 0
+        while ind < len(pages):
+            for ind, page in enumerate(pages):
+                if page.size < 2:
+                    pages.pop(ind)
+                    break
+            ind += 1
+
         for rm, rl, rr in zip(self._rays, np.roll(self._rays, 1), np.roll(self._rays, -1)):
 
             amp0 = np.append(amp0, rm.amp)
@@ -359,13 +396,6 @@ class Beam:
             dist0 = np.append(dist0, np.sqrt((rm.x[0] - rl.x[0]) ** 2 + (rm.y[0] - rl.y[0]) ** 2))
             dist0 = np.append(dist0, np.sqrt((rm.x[0] - rr.x[0]) ** 2 + (rm.y[0] - rr.y[0]) ** 2))
 
-            ind = rm.addpoint(y, axis=axis)
-            if len(ind) > 1:
-                return None
-
-            pnt = np.append(pnt, ind)
-            ph = np.append(ph, rm.ph[ind])
-            xout = np.append(xout, rm.x[ind])
 
             xx = np.ndarray((0,))
             yy = np.ndarray((0,))
