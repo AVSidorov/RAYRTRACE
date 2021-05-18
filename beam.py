@@ -413,7 +413,9 @@ class Beam:
 
             # For straight rays distance between points increases as 1/R
             # but in 2D case field amplitude decreases with distance as 1/sqrt(R)
+            # TODO zero division check
             amp1[page] = np.sqrt(np.sum(dist0.reshape((-1, 2)), 1) / np.sum(dist1.reshape((-1, 2)), 1))
+            amp1[np.isnan(amp1)] = amp0[np.isnan(amp1)]
 
             fields.append(amp0[page] * amp1[page] * np.exp(-1j * ph[page]))
             field[page] = field[page] + fields[-1]
@@ -429,9 +431,29 @@ class Beam:
         # field by xout
         ind = np.where(field == 0)[0]
         amp1[ind] = (np.roll(amp1, -1) + np.roll(amp1, 1))[ind]/2
+        amp1[np.isnan(amp1)] = amp0[np.isnan(amp1)]
         field[ind] = amp0[ind] * amp1[ind] * np.exp(-1j * ph[ind])
 
         return field, xout, amp0, amp1, ph, pnt
+
+
+def field_result(beam_tx: Beam, beam_rx: Beam):
+    field_tx, x, _, _, ph, pnt = beam_tx.field_r(beam_rx.y0)
+    field_rx = beam_rx.field(x=x, y=beam_rx.y0)
+
+    field = field_tx * field_rx
+
+    #
+    x_max = np.sum(np.abs(field) * x) / np.sum(np.abs(field))
+    x2ph = interp1d(x, ph, kind='cubic')
+    ph_max = x2ph(x_max)
+
+    dist = ((np.roll(x, -1) - x) + (x - np.roll(x,1)))/2
+    dist[0] = dist[1]
+    dist[-1] = dist[-2]
+
+    signal = np.sum(field * dist)
+    return field, x, x_max, ph_max, signal
 
 
 def points2circle(a, b, c):
