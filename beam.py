@@ -349,7 +349,7 @@ class Beam:
             y = y * 100  # rays are in CGS
         # TODO parsing for x,y
 
-        amp0, ph, dist0, dist1, xout = (np.ndarray((0,)) for _ in range(5))
+        ph, xout, amp0 = (np.ndarray((0,)) for _ in range(3))
         pnt = np.ndarray((0,), dtype=int)
 
         """ Rays classification by intersection"""
@@ -359,9 +359,12 @@ class Beam:
             if len(ind) > 1:
                 return None
 
+            amp0 = np.append(amp0, r.amp)
             pnt = np.append(pnt, ind)
             ph = np.append(ph, r.ph[ind])
             xout = np.append(xout, r.x[ind])
+
+        amp1 = amp0.copy()
 
         # TODO check or perform sorting rays by X
         cur_page = 0
@@ -389,35 +392,32 @@ class Beam:
                     break
             ind += 1
 
-        for rm, rl, rr in zip(self._rays, np.roll(self._rays, 1), np.roll(self._rays, -1)):
+        fields = list()
+        field = np.zeros_like(xout, dtype=complex)
+        for page in pages:
 
-            amp0 = np.append(amp0, rm.amp)
+            dist0, dist1 = (np.ndarray((0,)) for _ in range(2))
 
-            dist0 = np.append(dist0, np.sqrt((rm.x[0] - rl.x[0]) ** 2 + (rm.y[0] - rl.y[0]) ** 2))
-            dist0 = np.append(dist0, np.sqrt((rm.x[0] - rr.x[0]) ** 2 + (rm.y[0] - rr.y[0]) ** 2))
+            for pi, rm, rl, rr in zip(pnt[page], self._rays[page], np.roll(self._rays[page], 1), np.roll(self._rays[page], -1)):
+                for r in (rl, rr):
+                    dist0 = np.append(dist0, np.sqrt((rm.x[0] - r.x[0]) ** 2 + (rm.y[0] - r.y[0]) ** 2))
+                    ph2x = interp1d(r.ph, r.x, fill_value='extrapolate')
+                    ph2y = interp1d(r.ph, r.y, fill_value="extrapolate")
+                    dist1 = np.append(dist1, np.sqrt((ph2x(rm.ph[pi]) - rm.x[pi]) ** 2 + (ph2y(rm.ph[pi]) - rm.y[pi]) ** 2))
 
+            dist0[0] = dist0[1]
+            dist0[-1] = dist0[-2]
 
-            xx = np.ndarray((0,))
-            yy = np.ndarray((0,))
-            for r in (rl, rr):
-                ph2x = interp1d(r.ph, r.x, fill_value='extrapolate')
-                ph2y = interp1d(r.ph, r.y, fill_value="extrapolate")
-                xx = np.append(xx, ph2x(rm.ph[ind]))
-                yy = np.append(yy, ph2y(rm.ph[ind]))
+            dist1[0] = dist1[1]
+            dist1[-1] = dist1[-2]
 
-            dist1 = np.append(dist1, np.sqrt((xx - rm.x[ind]) ** 2 + (yy - rm.y[ind]) ** 2))
+            # For straight rays distance between points increases as 1/R
+            # but in 2D case field amplitude decreases with distance as 1/sqrt(R)
+            amp1[page] = np.sqrt(np.sum(dist0.reshape((-1, 2)), 1) / np.sum(dist1.reshape((-1, 2)), 1))
 
-        dist0[0] = dist0[1]
-        dist0[-1] = dist0[-2]
+            fields.append(amp0[page] * amp1[page] * np.exp(-1j * ph[page]))
+            field[page] = field[page] + fields[-1]
 
-        dist1[0] = dist1[1]
-        dist1[-1] = dist1[-2]
-
-        # For straight rays distance between points increases as 1/R
-        # but in 2D case field amplitude decreases with distance as 1/sqrt(R)
-        amp1 = np.sqrt(np.sum(dist0.reshape((-1, 2)), 1) / np.sum(dist1.reshape((-1, 2)), 1))
-
-        field = amp0 * amp1 * np.exp(-1j * ph)
         ind = np.argsort(xout)
         xout = xout[ind]
         field = field[ind]
@@ -425,10 +425,13 @@ class Beam:
         amp1 = amp1[ind]
         ph = ph[ind]
         pnt = pnt[ind]
-        dist0 = dist0[ind]
-        dist1 = dist1[ind]
 
-        return field, xout, amp0, amp1, ph, pnt, dist0, dist1
+        # field by xout
+        ind = np.where(field == 0)[0]
+        amp1[ind] = (np.roll(amp1, -1) + np.roll(amp1, 1))[ind]/2
+        field[ind] = amp0[ind] * amp1[ind] * np.exp(-1j * ph[ind])
+
+        return field, xout, amp0, amp1, ph, pnt
 
 
 def points2circle(a, b, c):
