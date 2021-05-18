@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.polynomial import Polynomial as poly
 from scipy import constants as const
 from scipy.interpolate import interp1d, interp2d, griddata
 
@@ -162,7 +163,7 @@ class RXYTEN:
 
     def on_self_cartesian(self, theta=None):
         den, r, theta = self.on_self_polar(theta=theta)
-        xx = self.x + r * (np.cos(theta) - self.tria * np.sin(theta) ** 2)
+        xx = self.x + r * (np.cos(theta) - self.tria * np.sin(theta)**2)
         yy = self.y + r * self.elon * np.sin(theta)
 
         return den, xx, yy
@@ -221,7 +222,7 @@ class RXYTEN:
             x, y = np.meshgrid(x, y)
 
         n = griddata((xx.flatten(), yy.flatten()), den.flatten(), (x, y),
-                     method='cubic', fill_value=self.den.min())
+                     method='linear')
 
         return np.squeeze(n), np.squeeze(x), np.squeeze(y)
 
@@ -255,6 +256,7 @@ class RXYTEN:
         if np.isscalar(limiter):
             _, _, theta = self.on_self_polar()
             theta = theta[:, 0]
+            #TODO fix if r.max==rlcs works bad
             rho, r, theta, x, y = self.on_polar(r=limiter, theta=theta)
         # TODO limiter as curve
 
@@ -266,18 +268,28 @@ class RXYTEN:
     def map_on(self, x, y, den):
         n = self.den
         self.den = self.r
+
         r, x, y = self.on_grid(x=x, y=y)
-        self.den = r
+
         # r must have by construction same length as den
+        # remove points outside radius range
+        den = np.delete(den, np.isnan(r))
+        r = np.delete(r, np.isnan(r))
+
+        # sort by r
         ind = np.argsort(r)
         r = r[ind]
         den = den[ind]
+
         # averaging on r grid to reduce noise and avoid duplicate r values
         nr = len(self.r)
         rr, nn = (np.ndarray((0,)) for _ in range(2))
 
+        r_low = np.insert((self.r[:-1] + self.r[1:])/2, 0, 0)
+        r_hgh = np.append((self.r[:-1] + self.r[1:])/2, self.r[-1] + (self.r[-1]-self.r[-2])/2)
+
         for ind in range(nr - 1):
-            bl = np.logical_and(self.r[ind] <= r, r < self.r[ind + 1])
+            bl = np.logical_and(r_low[ind] <= r, r < r_hgh[ind])
             if any(bl):
                 rr = np.append(rr, np.mean(r[bl]))
                 nn = np.append(nn, np.mean(den[bl]))
@@ -436,15 +448,35 @@ def adjust2phase(ph, chord, accuracy=0.01):
     return den, k
 
 
-def field_result(beam_tx: Beam, beam_rx: Beam):
-    field_tx, x, _, _, ph, pnt, _, dist = beam_tx.field_r(beam_rx.y0)
-    field_rx = beam_rx.field(x=x, y=beam_rx.y0)
+def rxyten_from_params(shifx=0., shify=0., delta=0.5, trian=0., elon=1., num=100, rdia=7.85, length_unit='cm'):
 
-    field = field_tx * field_rx
+    # convert inputs to polynomial objects
+    delta = poly(delta)
+    trian = poly(trian)
+    elon = poly(elon)
 
-    #
-    x_max = np.sum(np.abs(field) * x) / np.sum(np.abs(field))
-    x2ph = interp1d(x, ph, kind='cubic')
-    ph_max = x2ph(x_max)
-    signal = np.sum(field * dist)
-    return field, x, x_max, ph_max, signal
+    # define radius of Last Closed Surface
+    theta = np.linspace(0, 2*np.pi, RXYTEN._n_theta_max+1)[:-1]
+    rlcs = rdia
+    ex = np.inf
+    while ex>rdia:
+        lcs = (shifx + delta(rlcs) + rlcs * (np.cos(theta) + trian(rlcs) * np.sin(theta)**2)) +\
+              1j * (shify + rlcs * elon(rlcs) * np.sin(theta))
+        ex = np.abs(lcs).max()
+        rlcs = rlcs/ex * rdia
+
+    rxyten = np.zeros((num,6))
+    rxyten[:, 0] = np.linspace(0, rlcs, num)
+    rxyten[0, 0] = 1e-4
+    rxyten[:, 1] = shifx + delta(rxyten[:, 0])
+    rxyten[:, 2] = shify
+    rxyten[:, 3] = trian(rxyten[:, 0])
+    rxyten[:, 4] = elon(rxyten[:, 0])
+    # add SOL region
+    rxyten = np.vstack((rxyten,np.array([rdia*(1+1/num), 0, 0, 0, 1.0, 0])))
+    rxyten = np.vstack((rxyten,np.array([rdia*1.2, 0, 0, 0, 1.0, 0])))
+
+    return RXYTEN(rxyten)
+
+
+
