@@ -2,19 +2,7 @@ import numpy as np
 from numpy.polynomial import Polynomial as poly
 from scipy import constants as const
 from scipy.interpolate import interp1d, interp2d, griddata
-
-from beam import Beam
-
-
-class Beams(list):
-    def __init__(self, n_field=None):
-        self.n_field = n_field
-        super().__init__()
-
-    def append(self, *args, **kwargs) -> None:
-        super().append(Beam(*args, **kwargs, n_field=self.n_field))
-        # TODO freq from nfield
-
+from scipy.optimize import minimize_scalar
 
 class Nfield:
 
@@ -84,8 +72,6 @@ class Nfield:
 
         self.min_dxy = min(self.dx.min(), self.dy.min())
         self.prep_raytrace(freq=freq)
-        self.beamsTX = Beams(self)
-        self.beamsRX = Beams()
 
     def refractive_index(self, freq=136.26e9, x=None, y=None):
         if x is None or y is None:
@@ -280,24 +266,23 @@ class RXYTEN:
         ind = np.argsort(r)
         r = r[ind]
         den = den[ind]
+        del ind
 
         # averaging on r grid to reduce noise and avoid duplicate r values
         nr = len(self.r)
         rr, nn = (np.ndarray((0,)) for _ in range(2))
 
-        r_low = np.insert((self.r[:-1] + self.r[1:])/2, 0, 0)
-        r_hgh = np.append((self.r[:-1] + self.r[1:])/2, self.r[-1] + (self.r[-1]-self.r[-2])/2)
-
-        for ind in range(nr - 1):
-            bl = np.logical_and(r_low[ind] <= r, r < r_hgh[ind])
+        for r_low, r_hgh in zip(np.insert((self.r[:-1] + self.r[1:])/2, 0, 0),
+                                np.append((self.r[:-1] + self.r[1:])/2, self.r[-1] + (self.r[-1]-self.r[-2])/2)):
+            bl = np.logical_and(r_low <= r, r < r_hgh)
             if any(bl):
                 rr = np.append(rr, np.mean(r[bl]))
                 nn = np.append(nn, np.mean(den[bl]))
 
         r2den = interp1d(rr, nn, kind='linear', bounds_error=False, fill_value=np.nan)
         self.den = r2den(self.r)
-        self.den[np.logical_and(np.isnan(self.den), self.r < r.min())] = den.max()
-        self.den[np.logical_and(np.isnan(self.den), self.r > r.min())] = den.min()
+        self.den[np.logical_and(np.isnan(self.den), self.r <= rr.min())] = den.max()
+        self.den[np.logical_and(np.isnan(self.den), self.r >= rr.max())] = den.min()
 
     def normalize(self):
 
@@ -455,15 +440,14 @@ def rxyten_from_params(shifx=0., shify=0., delta=0.5, trian=0., elon=1., num=100
     trian = poly(trian)
     elon = poly(elon)
 
-    # define radius of Last Closed Surface
-    theta = np.linspace(0, 2*np.pi, RXYTEN._n_theta_max+1)[:-1]
-    rlcs = rdia
-    ex = np.inf
-    while ex>rdia:
-        lcs = (shifx + delta(rlcs) + rlcs * (np.cos(theta) + trian(rlcs) * np.sin(theta)**2)) +\
-              1j * (shify + rlcs * elon(rlcs) * np.sin(theta))
-        ex = np.abs(lcs).max()
-        rlcs = rlcs/ex * rdia
+    theta = np.linspace(0, 2 * np.pi, RXYTEN._n_theta_max + 1)[:-1]
+
+    lcs = lambda r: (shifx + delta(r) + r * (np.cos(theta) - trian(r) * np.sin(theta) ** 2)) + \
+                    1j * (shify + r * elon(r) * np.sin(theta))
+
+    rlcs = minimize_scalar(lambda r: abs(rdia - np.abs(lcs(r)).max()), bracket=(0, rdia),
+                           args=(), method='golden', tol=None,
+                           options={'xtol': 1e-4, 'maxiter': 5000}).x
 
     rxyten = np.zeros((num,6))
     rxyten[:, 0] = np.linspace(0, rlcs, num)
@@ -476,7 +460,7 @@ def rxyten_from_params(shifx=0., shify=0., delta=0.5, trian=0., elon=1., num=100
     rxyten = np.vstack((rxyten,np.array([rdia*(1+1/num), 0, 0, 0, 1.0, 0])))
     rxyten = np.vstack((rxyten,np.array([rdia*1.2, 0, 0, 0, 1.0, 0])))
 
-    return RXYTEN(rxyten)
+    return RXYTEN(rxyten), rlcs, lcs(rlcs)
 
 
 
