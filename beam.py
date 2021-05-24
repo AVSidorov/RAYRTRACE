@@ -1,6 +1,7 @@
 import numpy as np
 from scipy import constants as const
 from scipy.interpolate import interp1d
+from scipy.optimize import curve_fit
 from skimage import measure
 
 from ray import Ray
@@ -329,7 +330,7 @@ class Beam:
         amps = field_set['amp']
         phase = field_set['phase']  # for check
 
-        if n_field:
+        if not(n_field is None):
             # coefficient for units conversion
             if self.length_unit == 'm':
                 k = 100  # raytracing works in CGS
@@ -354,32 +355,36 @@ class Beam:
 
         """ Rays classification by intersection"""
         # prepare rays
-        for r in self._rays:
+        msk = np.full_like(self._rays, True, dtype=bool)
+        for ind, r in enumerate(self._rays):
             ind = r.addpoint(y, axis=axis)
+            if not hasattr(ind, '__len__'):
+                msk[ind] = False
             if len(ind) > 1:
-                return None
+                msk[ind] = False
 
             amp0 = np.append(amp0, r.amp)
             pnt = np.append(pnt, ind)
             ph = np.append(ph, r.ph[ind])
             xout = np.append(xout, r.x[ind])
 
+        self._rays = self._rays[msk]
         amp1 = amp0.copy()
 
         # TODO check or perform sorting rays by X
         cur_page = 0
-        pages = [np.atleast_1d(0),]
+        pages = [np.atleast_1d(0), ]
         while cur_page < len(pages):
             ind = pages[cur_page][-1] + 1
             while ind < len(self._rays):
                 # It assumes rays are sorted by X
-                if xout[ind] > xout[pages[cur_page][-1]]:   # add current point to current page
+                if xout[ind] > xout[pages[cur_page][-1]]:  # add current point to current page
                     inset = False
                     for page in pages:
                         inset = inset or (ind in page)
                     if not inset:
                         pages[cur_page] = np.append(pages[cur_page], ind)
-                elif cur_page+1 == len(pages):      # if new page not exist add new page with current ray index
+                elif cur_page + 1 == len(pages):  # if new page not exist add new page with current ray index
                     pages.append(np.atleast_1d(ind))
                 ind += 1
             cur_page += 1
@@ -398,12 +403,14 @@ class Beam:
 
             dist0, dist1 = (np.ndarray((0,)) for _ in range(2))
 
-            for pi, rm, rl, rr in zip(pnt[page], self._rays[page], np.roll(self._rays[page], 1), np.roll(self._rays[page], -1)):
+            for pi, rm, rl, rr in zip(pnt[page], self._rays[page], np.roll(self._rays[page], 1),
+                                      np.roll(self._rays[page], -1)):
                 for r in (rl, rr):
                     dist0 = np.append(dist0, np.sqrt((rm.x[0] - r.x[0]) ** 2 + (rm.y[0] - r.y[0]) ** 2))
                     ph2x = interp1d(r.ph, r.x, fill_value='extrapolate')
                     ph2y = interp1d(r.ph, r.y, fill_value="extrapolate")
-                    dist1 = np.append(dist1, np.sqrt((ph2x(rm.ph[pi]) - rm.x[pi]) ** 2 + (ph2y(rm.ph[pi]) - rm.y[pi]) ** 2))
+                    dist1 = np.append(dist1,
+                                      np.sqrt((ph2x(rm.ph[pi]) - rm.x[pi]) ** 2 + (ph2y(rm.ph[pi]) - rm.y[pi]) ** 2))
 
             dist0[0] = dist0[1]
             dist0[-1] = dist0[-2]
@@ -430,7 +437,7 @@ class Beam:
 
         # field by xout
         ind = np.where(field == 0)[0]
-        amp1[ind] = (np.roll(amp1, -1) + np.roll(amp1, 1))[ind]/2
+        amp1[ind] = (np.roll(amp1, -1) + np.roll(amp1, 1))[ind] / 2
         amp1[np.isnan(amp1)] = amp0[np.isnan(amp1)]
         field[ind] = amp0[ind] * amp1[ind] * np.exp(-1j * ph[ind])
 
@@ -443,17 +450,20 @@ def field_result(beam_tx: Beam, beam_rx: Beam):
 
     field = field_tx * field_rx
 
-    #
     x_max = np.sum(np.abs(field) * x) / np.sum(np.abs(field))
     x2ph = interp1d(x, ph, kind='cubic')
-    ph_max = x2ph(x_max)
 
-    dist = ((np.roll(x, -1) - x) + (x - np.roll(x,1)))/2
+    dist = ((np.roll(x, -1) - x) + (x - np.roll(x, 1))) / 2
     dist[0] = dist[1]
     dist[-1] = dist[-2]
 
     signal = np.sum(field * dist)
-    return field, x, x_max, ph_max, signal
+    props, _ = curve_fit(lambda xa, amp, x0, sigma: amp * np.exp(-(xa - x0) ** 2 / 2 / sigma ** 2), x, np.abs(field),
+                         (np.abs(field).max(), x_max, beam_tx.waist))
+    # ph_max = x2ph((x_max+props[1])/2)
+    ph_max = x2ph(props[1])
+
+    return field, x, x_max, ph_max, signal, props
 
 
 def points2circle(a, b, c):
