@@ -458,10 +458,16 @@ def field_result(beam_tx: Beam, beam_rx: Beam):
     dist[-1] = dist[-2]
 
     signal = np.sum(field * dist)
-    props, _ = curve_fit(lambda xa, amp, x0, sigma: amp * np.exp(-(xa - x0) ** 2 / 2 / sigma ** 2), x, np.abs(field),
-                         (np.abs(field).max(), x_max, beam_tx.waist))
-    # ph_max = x2ph((x_max+props[1])/2)
-    ph_max = x2ph(props[1])
+    try:
+        props, _ = curve_fit(lambda xa, amp, x0, sigma: amp * np.exp(-(xa - x0) ** 2 / 2 / sigma ** 2), x, np.abs(field),
+                             (np.abs(field).max(), x_max, beam_tx.waist))
+        # ph_max = x2ph((x_max+props[1])/2)
+        ph_max = x2ph(props[1])
+    except:
+        ph_max = x2ph(x_max)
+        props = None
+    finally:
+        pass
 
     return field, x, x_max, ph_max, signal, props
 
