@@ -213,6 +213,7 @@ def read_astra_tab(filename):
             ln = ln.split()
             for ind, tok in enumerate(ln):
                 try:
+                    # TODO conversion from old fortran format(without e 1.123-5) to exponential (1.123e-5)
                     ln[ind] = float(tok)
                 except ValueError:
                     pass
@@ -222,8 +223,15 @@ def read_astra_tab(filename):
     tbls = list()
 
     arr = np.ndarray((0,))
+    names = list()
     for ln in lines:
         if not all([isinstance(tok, float) for tok in ln]):
+            # try to store table
+            if arr.size > 0:
+                tbls.append({'names': names, 'values': arr})
+                names = list()
+                arr = np.ndarray((0,))
+
             # try extract name = value pairs
             toks = [format(_).split('=') for _ in ln]
             for ind, ele in enumerate(toks[:-1]):
@@ -235,10 +243,8 @@ def read_astra_tab(filename):
                         tbl[ele[0]] = float(ele[1])
                     except ValueError:
                         pass
-
+            # renew names and arr for table
             if all([not (isinstance(tok, float)) for tok in ln]):
-                if arr.size > 0:
-                    tbls.append({'names': names, 'values': arr})
                 names = ln
                 arr = np.ndarray((0, len(names)))
         elif len(ln) == len(names):
