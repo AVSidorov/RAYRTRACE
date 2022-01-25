@@ -74,13 +74,17 @@ class RXYTE:
         self.y = y[ind]
         self.tria = tria[ind]
         self.elon = elon[ind]
+        # internal n_theta
+        grid_step = np.diff(self.r).min()
+        theta = np.round(2 * np.pi * self.r.max() / grid_step).astype(np.int64)
+        self._n_theta = min(RXYTE._n_theta_max, theta)
 
-    def self_polar(self, theta=None):
-
+    def self_area(self, theta=None):
+        # This method returns area of geometry as radii(columns) x thetas (rows) meshgrids
+        # This method should be used to convert input data given in various ways to angles in radians
+        # and to combine radii and angles in meshgrids
         if theta is None:
-            grid_step = np.diff(self.r).min()
-            theta = np.round(2 * np.pi * self.r.max() / grid_step).astype(np.int64)
-            theta = min(RXYTE._n_theta_max, theta)
+            theta = self._n_theta
 
         if isinstance(theta, (int, np.int64)):
             n_theta = theta
@@ -91,10 +95,21 @@ class RXYTE:
         return r, theta
 
     def self_cartesian(self, theta=None):
-        r, theta = self.self_polar(theta=theta)
+        # This method returns cartesian coordinates of surfaces points as meshgrids where rows and columns correspond
+        # to surface radius and poloidal angle
+        # So thus points are not equidistant, columns and raws are not parallel, columns are not orthogonal to raws at large scales.
+        # But local orthogonality is presented, which can be used to compute gradients.
+        # In this case, we get a gradient in the form of poloidal and radial components.
+        r, theta = self.self_area(theta=theta)
         xx = self.x + r * (np.cos(theta) - self.tria * np.sin(theta) ** 2)
         yy = self.y + r * self.elon * np.sin(theta)
         return xx, yy, r, theta
+
+    def self_polar(self, theta=None):
+        # This method is similar to self_cartesian. But returns geometry  polar coordinates. (Full Area)
+        xx, yy, r, theta = self.self_cartesian(theta)
+        vec = xx + 1j * yy
+        return np.abs(vec), np.angle(vec), r, theta
 
     @property
     def nested(self):
@@ -127,6 +142,12 @@ class RXYTE:
                                          limiter=limiter)
 
         return rlcs, lcs
+
+    def cartesian2r(self, points):
+        # returns radii of surfaces for inputed points
+        # Points should be given in same way as in scipy.interpolate.griddata
+        xx, yy, r, theta = self.self_cartesian()
+        return interp.griddata((xx.flatten(), yy.flatten()), r.flatten(), points)
 
 
 def rlcs_from_params(shifx=0., shify=0., trian=0., elon=1., limiter=7.85):
