@@ -281,7 +281,7 @@ class RXYTEN:
 
         r2den = interp1d(rr, nn, kind='linear', bounds_error=False, fill_value=np.nan)
         self.den = r2den(self.r)
-        self.den[np.logical_and(np.isnan(self.den), self.r <= rr.min())] = den.max()
+        self.den[np.logical_and(np.isnan(self.den), self.r <= rr.min())] = r2den(rr.min())
         self.den[np.logical_and(np.isnan(self.den), self.r >= rr.max())] = den.min()
 
     def normalize(self):
