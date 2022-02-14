@@ -317,10 +317,13 @@ class RXYTEN:
             return
 
         dn = (self.den[-1] - self.den[-2]) / (self.r[-1] - self.r[-2])
-        b = -dn / (self.den[-1] - bkg)
-        a = (self.den[-1] - bkg) / np.exp(-b * self.r[-1])
+
+        a = self.den[-1]
+        b = dn
+        c = (bkg - a - b * (r - self.r[-1])) / (r - self.r[-1]) ** 2
+
         radd = np.linspace(self.r[-1], r, n + 1)[1:]
-        nadd = a * np.exp(-b * radd) + bkg
+        nadd = a + b * (radd - self.r[-1]) + c * (radd - self.r[-1]) ** 2
         self.r = np.concatenate((self.r, radd))
         self.den = np.concatenate((self.den, nadd))
         self.x = np.concatenate((self.x, np.repeat(self.x[-1], n)))
