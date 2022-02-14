@@ -49,105 +49,100 @@ class Equilibrium:
                                                       self.psi, kx=1, ky=1)
 
 
-class RXYTE:
-    """
-        Class represents geometry of psi through shifts, elongation and triangulation
-    """
-    _n_theta_max = 1000
+class robj:
+    def __init__(self, r_lcs=7.85, length_unit='cm', **kwargs):
+        self.length_units = length_unit
+        self.r_lcs = r_lcs
 
-    def __init__(self, r, x=None, y=None, tria=None, elon=None):
-        if isinstance(r, np.ndarray):
-            if r.ndim == 2:
-                if r.shape[1] >= 5:
-                    r, x, y, tria, elon = (r[:, i] for i in range(5))
-        elif isinstance(r, (int, np.int64)):
-            (self.r, self.x, self.y, self.tria) = (np.zeros((r,)) for _ in range(4))
-            self.elon = np.ones((r, 1))
-        elif isinstance(r, (tuple, list)):
-            if len(r) == 2:
-                self.r = np.linspace(0, r[0], r[1])
-                (self.x, self.y, self.tria) = (np.zeros((r[1],)) for _ in range(3))
-                self.elon = np.ones((r[1], 1))
-        ind = np.argsort(r)
-        self.r = r[ind]
-        self.x = x[ind]
-        self.y = y[ind]
-        self.tria = tria[ind]
-        self.elon = elon[ind]
-        # internal n_theta
-        grid_step = np.diff(self.r).min()
-        theta = np.round(2 * np.pi * self.r.max() / grid_step).astype(np.int64)
-        self._n_theta = min(RXYTE._n_theta_max, theta)
+        self.params = dict()
+        # mandatory parameters describing geometry of magnetic surfaces
+        self.param_add((0, 0), name='x')
+        self.param_add((0, 0), name='y')
+        self.param_add((0, 0), name='tria')
+        self.param_add((1, 1), name='elon')
 
-    def self_area(self, theta=None):
-        # This method returns area of geometry as radii(columns) x thetas (rows) meshgrids
-        # This method should be used to convert input data given in various ways to angles in radians
-        # and to combine radii and angles in meshgrids
-        if theta is None:
-            theta = self._n_theta
+        for param in kwargs:
+            self.param_add(kwargs[param], name=param)
 
-        if isinstance(theta, (int, np.int64)):
-            n_theta = theta
-            theta = np.linspace(0, 2 * np.pi, n_theta + 1)[:-1]
+    def param_add(self, param, name='par', ends='nearest', **kwargs):
+        # kwargs as in scipy.interpolate.Rbf()
+        if name == 'par':
+            name = f'par{len(self.params):02d}'
 
-        r, theta = np.meshgrid(self.r, theta)
+        if callable(param):
+            self.params[name] = param
+        else:
+            param = np.atleast_2d(param)
+            if param.shape[0] < param.shape[1]:
+                param = param.T
+            if param.shape[1] == 1:
+                r = np.linspace(0, 1, param.shape[0])
+                val = param[:, 0]
+            elif param.shape[1] >= 2:
+                r = param[:, 0]
+                val = param[:, 1]
+                ind = np.argsort(r)
+                r = r[ind]
+                val = val[ind]
 
-        return r, theta
+            if r.min() > 0:
+                ind = np.argmin(r)
+                r = np.append(r, (0, r.min() / 2))
+                if ends == 'nearest':
+                    val = np.append(val, (val[ind], val[ind]))
 
-    def self_cartesian(self, theta=None):
-        # This method returns cartesian coordinates of surfaces points as meshgrids where rows and columns correspond
-        # to surface radius and poloidal angle
+            self.params[name] = interp.Rbf(r, val, **kwargs)
+
+    def cartesian(self, rho=100, theta=360):
+        # This method returns cartesian coordinates (R, Z, phi) at given rho and poloida angles
+        # If both integer scalars are given returns full geometry (poloidal section)
+        # Points are returned as meshgrids where rows and columns correspond to surface radius and poloidal angle.
         # So thus points are not equidistant, columns and raws are not parallel, columns are not orthogonal to raws at large scales.
         # But local orthogonality is presented, which can be used to compute gradients.
         # In this case, we get a gradient in the form of poloidal and radial components.
-        r, theta = self.self_area(theta=theta)
-        xx = self.x + r * (np.cos(theta) - self.tria * np.sin(theta) ** 2)
-        yy = self.y + r * self.elon * np.sin(theta)
-        return xx, yy, r, theta
 
-    def self_polar(self, theta=None):
-        # This method is similar to self_cartesian. But returns geometry  polar coordinates. (Full Area)
-        xx, yy, r, theta = self.self_cartesian(theta)
-        vec = xx + 1j * yy
-        return np.abs(vec), np.angle(vec), r, theta
+        if isinstance(rho, (int, np.int64)):
+            rho = np.linspace(0, 1, rho)
+        if isinstance(theta, (int, np.int64)):
+            theta = np.linspace(0, 2 * np.pi, theta, endpoint=False)
+
+        rho, theta = np.meshgrid(rho, theta)
+
+        xx = self.params['x'](rho) + rho * self.r_lcs * (np.cos(theta) - self.params['tria'](rho) * np.sin(theta) ** 2)
+        yy = self.params['y'](rho) + rho * self.r_lcs * self.params['elon'](rho) * np.sin(theta)
+        return xx, yy, rho, theta
+
+    def cartesian2rho(self, points, rho=100, theta=360):
+        # returns radii of surfaces for inputed points
+        # Points should be given in same way as in scipy.interpolate.griddata
+        xx, yy, rho, theta = self.cartesian(rho, theta)
+        return interp.griddata((xx.flatten(), yy.flatten()), rho.flatten(), points)
+
+    def map_on(self, x, y, val, name='par', rho=100, theta=360, ends='nearest', **kwargs):
+        # getting surface radii of given points
+        rho_in = rho.copy()
+        rho = self.cartesian2rho((x, y), rho, theta)
+
+        if rho.max() < rho_in.max():
+            ind = np.argmax(rho)
+            rho = np.append(rho, (rho_in.max() - (rho_in.max() - rho.max()), rho_in.max()))
+            if ends == 'nearest':
+                val = np.append(val, (val[ind], val[ind]))
+
+        self.param_add((rho, val), name, ends=ends, **kwargs)
 
     @property
     def nested(self):
-        xx, yy, *_ = self.self_cartesian()
+        xx, yy, rho, theta = self.cartesian()
         inout = 1
-        for ri in range(len(self.r) - 1):
-            inout *= -check_inside((xx[:, ri] - self.x[ri], yy[:, ri] - self.y[ri]),
-                                   (xx[:, ri + 1] - self.x[ri], yy[:, ri + 1] - self.y[ri]))
+        for ri in range(rho.shape[1] - 1):
+            inout *= -check_inside((xx[:, ri] - self.params['x'](rho[0, ri]), yy[:, ri] - self.params['y'](rho[0, ri])),
+                                   (xx[:, ri + 1] - self.params['x'](rho[0, ri]),
+                                    yy[:, ri + 1] - self.params['y'](rho[0, ri])))
         if inout == 1:
             return True
         else:
             return False
-
-    def r_lcs(self, limiter):
-        xx, yy, *_ = self.self_cartesian()
-        limiter = to_complex(limiter)
-        ri = 0
-        while ri < len(self.r) and \
-                check_inside((xx[:, ri] - self.x[ri], yy[:, ri] - self.y[ri]),
-                             (limiter.real - self.x[ri], limiter.imag - self.y[ri])):
-            ri += 1
-        if ri < len(self.r) - 1:
-            rlcs, lcs = rlcs_from_params(shifx=lc(self.r[ri], self.r[ri + 1], self.x[ri], self.x[ri + 1]),
-                                         shify=lc(self.r[ri], self.r[ri + 1], self.y[ri], self.y[ri + 1]),
-                                         trian=lc(self.r[ri], self.r[ri + 1], self.tria[ri], self.tria[ri + 1]),
-                                         elon=lc(self.r[ri], self.r[ri + 1], self.elon[ri], self.elon[ri + 1]),
-                                         limiter=limiter)
-        else:
-            rlcs, lcs = rlcs_from_params(self.x[-1], self.y[-1], trian=self.tria[-1], elon=self.elon[-1],
-                                         limiter=limiter)
-
-        return rlcs, lcs
-
-    def cartesian2r(self, points):
-        # returns radii of surfaces for inputed points
-        # Points should be given in same way as in scipy.interpolate.griddata
-        xx, yy, r, theta = self.self_cartesian()
-        return interp.griddata((xx.flatten(), yy.flatten()), r.flatten(), points)
 
 
 def rlcs_from_params(shifx=0., shify=0., trian=0., elon=1., limiter=7.85):
@@ -173,11 +168,11 @@ def rlcs_from_params(shifx=0., shify=0., trian=0., elon=1., limiter=7.85):
                            bounds=(0, np.abs(limiter).max()),
                            args=(), method='bounded', tol=None,
                            options={'xatol': 1e-4, 'maxiter': 5000, 'disp': 0}).x
-    return rlcs, lcs(rlcs)
+    return rlcs, lcs(rlcs), limiter
 
 
-def rxyte_from_params(shifx=0., shify=0., trian=0., elon=1., num=100, limiter=7.85, length_unit='cm'):
-    rlcs, lcs = rlcs_from_params(shifx, shify, trian, elon, limiter)
+def robj_from_params(shifx=0., shify=0., trian=0., elon=1., limiter=7.85, length_unit='cm'):
+    rlcs, *_ = rlcs_from_params(shifx, shify, trian, elon, limiter)
 
     # convert inputs to polynomial objects
     shifx = poly(shifx)
@@ -185,15 +180,7 @@ def rxyte_from_params(shifx=0., shify=0., trian=0., elon=1., num=100, limiter=7.
     trian = poly(trian)
     elon = poly(elon)
 
-    rxyte = np.zeros((num, 5))
-    rxyte[:, 0] = np.linspace(0, rlcs, num)
-    rxyte[0, 0] = 1e-4
-    rxyte[:, 1] = shifx(rxyte[:, 0])
-    rxyte[:, 2] = shify(rxyte[:, 0])
-    rxyte[:, 3] = trian(rxyte[:, 0])
-    rxyte[:, 4] = elon(rxyte[:, 0])
-
-    return RXYTE(rxyte), rlcs, lcs
+    return robj(r_lcs=rlcs, length_unit=length_unit, x=shifx, y=shify, tria=trian, elon=elon)
 
 
 def check_inside(a, b):
@@ -296,7 +283,7 @@ def read_astra_tab(filename):
 
 def rxyte_from_astra_tab(tbl):
     # TODO change names of parameters in astra
-    return RXYTE(tbl['a'], x=tbl['shif'], y=tbl['shiv'], tria=tbl['tria'], elon=tbl['elon'])
+    return robj(tbl['a'], x=tbl['shif'], y=tbl['shiv'], tria=tbl['tria'], elon=tbl['elon'])
 
 
 def geqdsk_from_astra_tab(tbl, nx=65, ny=65, rdim=0.25, zdim=0.25, rmain=0.55, btor=2.2, current=25000, boundary=None,
@@ -382,15 +369,19 @@ def geqdsk_from_astra_tab(tbl, nx=65, ny=65, rdim=0.25, zdim=0.25, rmain=0.55, b
 
 def to_complex(curve):
     if np.isscalar(curve):
-        theta = np.linspace(0, 2 * np.pi, RXYTE._n_theta_max, endpoint=False)
+        theta = np.linspace(0, 2 * np.pi, 360, endpoint=False)
         curve = curve * np.cos(theta) + 1j * curve * np.sin(theta)
     elif isinstance(curve, (tuple, list)):
         if len(curve) == 2:
-            curve = curve[0] + 1j * curve[1]
+            curve = np.array(curve[0] + 1j * curve[1])
     elif isinstance(curve, np.ndarray):
         if curve.ndim == 2:
+            if curve.shape[0] < curve.shape[1]:
+                curve = curve.T
             curve = curve[:, 0] + 1j * curve[:, 1]
-    curve = curve[np.argsort(np.angle(curve))]
+    if isinstance(curve, np.ndarray):
+        if curve.ndim == 1:
+            curve = curve[np.argsort(np.angle(curve))]
     return curve
 
 
