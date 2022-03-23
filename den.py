@@ -417,6 +417,25 @@ def den2phase(den, x=None, y=None, freq=None, axis=0, length_unit='cm', den_unit
     return ph
 
 
+def phase2den(dph_dl, freq=None, length_unit='cm', den_unit='cm^-3'):
+    # use wave length 2.2 mm
+    if freq is None:
+        freq = const.speed_of_light * 100 / 0.22
+
+    # coefficient for  length units conversion
+    if length_unit == 'cm':
+        k = 100
+    else:
+        k = 1
+
+    den_critical = critical_den(freq, den_unit=den_unit)
+
+    w = 2 * np.pi * freq
+
+    den = den_critical * (1 - (1 - 2 * np.pi * dph_dl * const.speed_of_light * k / w) ** 2)
+    return den
+
+
 def adjust2phase(ph, chord, accuracy=0.01):
     x2ph = interp1d(ph[0], ph[1], kind='cubic', bounds_error=False)
 
