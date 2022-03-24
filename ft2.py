@@ -16,6 +16,12 @@ def ants():
     return ant
 
 
+def limiter(r_dia=r_dia, theta=360):
+    if isinstance(theta, (int, np.int64)):
+        theta = np.linspace(0, 2 * np.pi, theta, endpoint=False)
+    return r_dia * np.cos(theta), r_dia * np.sin(theta)
+
+
 def phases(den, x, y, *, ant_tx=None, ant_rx=None, a_set=None, nst=-1, nray=251):
     Beam._nray = nray
     if ant_tx is None:
