@@ -1,4 +1,44 @@
 import numpy as np
+from scipy.interpolate import interp1d
+
+import ft2
+from den import phase2den, den2phase
+
+
+def phases_add_ends(ph, n=10, r_lcs=ft2.r_dia, shift=0, bkg=1e12, r_bkg=ft2.r_ant):
+    ph = ph.copy()
+    x = np.concatenate((np.linspace(-r_bkg, shift - r_lcs, n), np.linspace(shift + r_lcs, r_bkg, n)))
+    l_chords = chord_length(x, r_bkg)
+
+    if ph.shape[1] == 2:
+        np.column_stack((ph[:, 0], ph[:, 1], ph[:, 1] * 0.1))
+
+    dph_dl = den2phase(bkg)
+    ph_add = np.column_stack((x, l_chords * dph_dl, np.zeros_like(x)))
+    ph = np.append(ph, ph_add, axis=0)
+    ph = ph[ph[:, 0].argsort()]
+
+    return ph
+
+
+def phase_spline(ph, x=None, x_err=1.):
+    if isinstance(x, int):
+        x = np.linspace(ph[:, 0].min(), ph[:, 0].max(), x)
+
+    err_ph = np.random.randn(ph.shape[0]) * ph[:, 2] / 6
+    while not all(np.abs(err_ph) <= ph[:, 2]):
+        err_ph = np.random.randn(ph.shape[0]) * ph[:, 2] / 6
+
+    err_x = np.random.randn(ph.shape[0]) * np.sign(ph[:, 2]) * x_err / 6
+    while not all(np.abs(err_x) <= np.sign(ph[:, 2]) * x_err):
+        err_x = np.random.randn(ph.shape[0]) * np.sign(ph[:, 2]) * x_err / 6
+
+    phs = interp1d(ph[:, 0] + err_x, ph[:, 1] + err_ph, kind='cubic', bounds_error=False, fill_value=0)
+
+    if x is not None:
+        return phs(x), x
+    else:
+        return phs
 
 
 def pancake(x, ph, bkg=0, elong=None, trian=None):
